@@ -286,12 +286,13 @@ class CWriter {
   void WriteTags();
   void ComputeUniqueImports();
   void BeginInstance();
+  void WriteImportsNoSandbox();
   void WriteImports();
   void WriteFuncDeclarations();
   void WriteFuncDeclaration(const FuncDeclaration&, const std::string&);
   void WriteImportFuncDeclaration(const FuncDeclaration&,
                                   const std::string& module_name,
-                                  const std::string&);
+                                  const std::string& name);
   void WriteCallIndirectFuncDeclaration(const FuncDeclaration&,
                                         const std::string&);
   void WriteModuleInstance();
@@ -638,7 +639,12 @@ std::string_view StripLeadingDollar(std::string_view name) {
 void CWriter::DefineImportName(const Import* import,
                                std::string_view module,
                                std::string_view field_name) {
-  std::string mangled = MangleName(module) + MangleName(field_name);
+  std::string mangled;
+  if (options_.no_sandbox && module == "env") {
+    mangled = field_name;
+  } else {
+    mangled = MangleName(module) + MangleName(field_name);
+  }
   std::string name;
   ModuleFieldType type;
 
@@ -1375,6 +1381,37 @@ void CWriter::BeginInstance() {
     }
 
     Write(Newline());
+  }
+}
+
+// Write module-wide imports (funcs & tags), which aren't tied to an instance.
+void CWriter::WriteImportsNoSandbox() {
+  if (module_->imports.empty())
+    return;
+
+  Write(Newline());
+
+  for (const Import* import : unique_imports_) {
+    if (import->kind() == ExternalKind::Func) {
+      Write("/* import: '", import->module_name, "' '", import->field_name,
+            "' */", Newline());
+      const Func& func = cast<FuncImport>(import)->func;
+      if (import->module_name == "env") {
+        WriteImportFuncDeclaration(func.decl, import->module_name,
+                                   import->field_name);
+      } else {
+        WriteImportFuncDeclaration(
+            func.decl, import->module_name,
+            MangleName(import->module_name) + MangleName(import->field_name));
+      }
+      Write(";");
+      Write(Newline());
+    } else if (import->kind() == ExternalKind::Tag) {
+      Write("/* import: '", import->module_name, "' '", import->field_name,
+            "' */", Newline());
+      Write("extern const u32 *", MangleName(import->module_name),
+            MangleName(import->field_name), ";", Newline());
+    }
   }
 }
 
@@ -5026,7 +5063,11 @@ void CWriter::WriteCHeader() {
   WriteFreeDecl();
   WriteGetFuncTypeDecl();
   WriteMultivalueTypes();
-  WriteImports();
+  if (options_.no_sandbox) {
+    WriteImportsNoSandbox();
+  } else {
+    WriteImports();
+  }
   WriteImportProperties(CWriterPhase::Declarations);
   WriteExports(CWriterPhase::Declarations);
   Write(s_header_bottom);
