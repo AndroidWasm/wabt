@@ -418,6 +418,7 @@ class CWriter {
 
   std::vector<std::string> unique_func_type_names_;
   const Global* stack_pointer_global_ = nullptr;
+  std::string current_stack_ptr_var_name_;
 };
 
 // TODO: if WABT begins supporting debug names for labels,
@@ -1352,9 +1353,14 @@ void CWriter::BeginInstance() {
 
     if (options_.no_sandbox && import->kind() == ExternalKind::Global &&
         import->field_name == kStackPointerName) {
-      Write("/* ", kStackPointerName,
-            " implementation is replaced with thread-local array */",
-            Newline());
+      if (options_.use_c_stack) {
+        Write("/* ", kStackPointerName, " usage is replaced with c-stack */",
+              Newline());
+      } else {
+        Write("/* ", kStackPointerName,
+              " implementation is replaced with thread-local array */",
+              Newline());
+      }
       continue;
     }
     switch (import->kind()) {
@@ -1513,8 +1519,10 @@ void CWriter::WriteGlobals() {
   Index global_index = 0;
   for (const Global* global : module_->globals) {
     if (options_.no_sandbox && global->name == kStackPointerName) {
-      // Remember the global to write it later (it needs to be part of .c file)
-      stack_pointer_global_ = global;
+      if (!options_.use_c_stack) {
+        // Remember the global to write it later (it needs to be part of .c file)
+        stack_pointer_global_ = global;
+      }
     } else {
       bool is_import = global_index < module_->num_global_imports;
       if (!is_import) {
@@ -2387,6 +2395,7 @@ void CWriter::Write(const Func& func) {
   stack_var_sym_map_.clear();
   func_sections_.clear();
   func_includes_.clear();
+  current_stack_ptr_var_name_.clear();
 
   Write("static ", ResultType(func.decl.sig.result_types), " ",
         GlobalName(ModuleFieldType::Func, func.name), "(");
@@ -2932,9 +2941,26 @@ void CWriter::Write(const ExprList& exprs) {
       case ExprType::GlobalGet: {
         const Var& var = cast<GlobalGetExpr>(&expr)->var;
         if (options_.no_sandbox && var.name() == kStackPointerName) {
-          PushType(module_->GetGlobal(var)->type);
-          Write(StackVar(0), " = ((uintptr_t)&", kStackArrayVariableName,
-                "[0]) + ", kStackOffsetGlobalVariableName, ";", Newline());
+          if (options_.use_c_stack) {
+            // Since __builtin_alloca(0) still allocates 16bytes second access to
+            // __stack_pointer needs to access current_stack_ptr_var_name_ without
+            // call to alloca.
+            if (current_stack_ptr_var_name_.empty()) {
+              current_stack_ptr_var_name_ =
+                  DefineLocalScopeName(kStackPointerName, false);
+              Write(module_->GetGlobal(var)->type, " ",
+                    current_stack_ptr_var_name_, " = (",
+                    module_->GetGlobal(var)->type, ")__builtin_alloca(0);",
+                    Newline());
+            }
+            PushType(module_->GetGlobal(var)->type);
+            Write(StackVar(0), " = ", current_stack_ptr_var_name_, ";",
+                  Newline());
+          } else {
+            PushType(module_->GetGlobal(var)->type);
+            Write(StackVar(0), " = ((uintptr_t)&", kStackArrayVariableName,
+                  "[0]) + ", kStackOffsetGlobalVariableName, ";", Newline());
+          }
         } else {
           PushType(module_->GetGlobal(var)->type);
           Write(StackVar(0), " = ", GlobalInstanceVar(var), ";", Newline());
@@ -2945,15 +2971,39 @@ void CWriter::Write(const ExprList& exprs) {
       case ExprType::GlobalSet: {
         const Var& var = cast<GlobalSetExpr>(&expr)->var;
         if (options_.no_sandbox && var.name() == kStackPointerName) {
-          Write("if (UNLIKELY(", StackVar(0), " < ", kStackBufferSize,
-                " + (uintptr_t)", kStackArrayVariableName, ")) TRAP(OOB);",
-                Newline());
-          Write("if (UNLIKELY(", StackVar(0), " > ",
-                kStackBufferSize + kStackSize, " + (uintptr_t)",
-                kStackArrayVariableName, ")) TRAP(OOB);", Newline());
-          Write(kStackOffsetGlobalVariableName, " = ", StackVar(0),
-                " - ((uintptr_t)&", kStackArrayVariableName, "[0]);",
-                Newline());
+          if (options_.use_c_stack) {
+            // At this point current_stack_pointer variable name shouldn't be
+            // empty.
+            assert(!current_stack_ptr_var_name_.empty());
+            Write("if (", StackVar(0), " < ", current_stack_ptr_var_name_, ") ",
+                  OpenBrace());
+            Write(StackType(0), " sp = (", StackType(0), ")__builtin_alloca(",
+                  current_stack_ptr_var_name_, " - ", StackVar(0), ");",
+                  Newline());
+            // TODO: Do we want CHECK_EQ/NE/... in wasm-rt.h?
+//            Write("if (UNLIKELY(sp != ", StackVar(0), ")) ", OpenBrace());
+//            Write("TRAP(OOB);", Newline());
+//            Write(CloseBrace(), Newline());
+            // Update current stack pointer. We intentionally do not update it
+            // if there was no alloca call, since we need it to always point on
+            // the top of the actual stack. This might lead to the situation when
+            // after "deallocation" the code allocates again - in which case this
+            // code will not reuse already allocated space on the stack. If such
+            // situation occurs it can be addressed by keeping track of allocated
+            // space as well as the current stack pointer.
+            Write(current_stack_ptr_var_name_, " = sp;", Newline());
+            Write(CloseBrace(), Newline());
+          } else {
+            Write("if (UNLIKELY(", StackVar(0), " < ", kStackBufferSize,
+                  " + (uintptr_t)", kStackArrayVariableName, ")) TRAP(OOB);",
+                  Newline());
+            Write("if (UNLIKELY(", StackVar(0), " > ",
+                  kStackBufferSize + kStackSize, " + (uintptr_t)",
+                  kStackArrayVariableName, ")) TRAP(OOB);", Newline());
+            Write(kStackOffsetGlobalVariableName, " = ", StackVar(0),
+                  " - ((uintptr_t)&", kStackArrayVariableName, "[0]);",
+                  Newline());
+          }
         } else {
           Write(GlobalInstanceVar(var), " = ", StackVar(0), ";", Newline());
         }

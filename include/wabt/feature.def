@@ -41,3 +41,4 @@ WABT_FEATURE(multi_memory,        "multi-memory",            false,   "Multi-mem
 WABT_FEATURE(extended_const,      "extended-const",          false,   "Extended constant expressions")
 WABT_FEATURE(relaxed_simd,        "relaxed-simd",            false,   "Relaxed SIMD")
 WABT_FEATURE(sandbox,             "sandbox",                 true,    "Use WASM sandbox (disabling is experimental)")
+WABT_FEATURE(c_stack,             "c-stack",                 true,    "Use C stack instead of thread_local array in no-sandbox mode (does nothing in sandbox mode)")

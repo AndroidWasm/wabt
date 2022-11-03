@@ -58,7 +58,7 @@ examples:
 
 static const std::string supported_features[] = {
     "multi-memory", "multi-value", "sign-extend", "saturating-float-to-int",
-    "exceptions",   "memory64",    "sandbox"};
+    "exceptions",   "memory64",    "sandbox",     "c-stack"};
 
 static const std::string experimental_features[] = {"sandbox"};
 
@@ -108,6 +108,7 @@ static void ParseOptions(int argc, char** argv) {
   parser.Parse(argc, argv);
 
   s_write_c_options.no_sandbox = !s_features.sandbox_enabled();
+  s_write_c_options.use_c_stack = s_features.c_stack_enabled();
 
   bool any_non_supported_feature = false;
   bool any_experimental_feature = false;

@@ -42,6 +42,7 @@ options:
       --enable-extended-const                  Enable Extended constant expressions
       --enable-relaxed-simd                    Enable Relaxed SIMD
       --disable-sandbox                        Disable Use WASM sandbox (disabling is experimental)
+      --disable-c-stack                        Disable Use C stack instead of thread_local array in no-sandbox mode (does nothing in sandbox mode)
       --enable-all                             Enable all features
   -o, --output=FILE                            Output wasm binary file. Use "-" to write to stdout.
   -r, --relocatable                            Create a relocatable wasm binary (suitable for linking with e.g. lld)

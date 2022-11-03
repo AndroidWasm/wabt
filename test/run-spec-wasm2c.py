@@ -543,6 +543,7 @@ def main(args):
     parser.add_argument('--disable-reference-types', action='store_true')
     parser.add_argument('--debug-names', action='store_true')
     parser.add_argument('--disable-sandbox', action='store_true')
+    parser.add_argument('--disable-c-stack', action='store_true')
     options = parser.parse_args(args)
 
     with utils.TempDirectory(options.out_dir, 'run-spec-wasm2c-') as out_dir:
@@ -573,7 +574,8 @@ def main(args):
             '--enable-memory64': options.enable_memory64,
             '--enable-multi-memory': options.enable_multi_memory,
             '--experimental': options.experimental,
-            '--disable-sandbox': options.disable_sandbox})
+            '--disable-sandbox': options.disable_sandbox,
+            '--disable-c-stack': options.disable_c_stack})
 
         options.cflags += shlex.split(os.environ.get('WASM2C_CFLAGS', ''))
         cc = utils.Executable(options.cc, *options.cflags, forward_stderr=True,

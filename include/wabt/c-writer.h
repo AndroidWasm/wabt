@@ -27,6 +27,7 @@ class Stream;
 struct WriteCOptions {
   std::string_view module_name;
   bool no_sandbox;
+  bool use_c_stack;
 };
 
 Result WriteC(Stream* c_stream,
