@@ -1001,6 +1001,9 @@ std::string CWriter::GenerateHeaderGuard() const {
 void CWriter::WriteSourceTop() {
   Write(s_source_includes);
   Write(Newline(), "#include \"", header_name_, "\"", Newline());
+  if (options_.no_sandbox) {
+    Write("#define NO_SANDBOX", Newline());
+  }
   Write(s_source_declarations);
 }
 
@@ -3334,9 +3337,13 @@ void CWriter::Write(const LoadExpr& expr) {
   Memory* memory = module_->memories[module_->GetMemoryIndex(expr.memidx)];
 
   Type result_type = expr.opcode.GetResultType();
-  Write(StackVar(0, result_type), " = ", func, "(",
-        ExternalInstancePtr(ModuleFieldType::Memory, memory->name), ", (u64)(",
-        StackVar(0), ")");
+  if (options_.no_sandbox) {
+    Write(StackVar(0, result_type), " = ", func, "((u64)(", StackVar(0), ")");
+  } else {
+    Write(StackVar(0, result_type), " = ", func, "(",
+          ExternalInstancePtr(ModuleFieldType::Memory, memory->name),
+          ", (u64)(", StackVar(0), ")");
+  }
   if (expr.offset != 0)
     Write(" + ", expr.offset, "u");
   Write(");", Newline());
@@ -3365,8 +3372,13 @@ void CWriter::Write(const StoreExpr& expr) {
 
   Memory* memory = module_->memories[module_->GetMemoryIndex(expr.memidx)];
 
-  Write(func, "(", ExternalInstancePtr(ModuleFieldType::Memory, memory->name),
-        ", (u64)(", StackVar(1), ")");
+  if (options_.no_sandbox) {
+    Write(func, "((u64)(", StackVar(1), ")");
+  } else {
+    Write(func, "(", ExternalInstancePtr(ModuleFieldType::Memory, memory->name),
+          ", (u64)(", StackVar(1), ")");
+  }
+
   if (expr.offset != 0)
     Write(" + ", expr.offset);
   Write(", ", StackVar(0), ");", Newline());
