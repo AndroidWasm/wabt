@@ -92,7 +92,10 @@ class CodeMetadataExprQueue {
 
 class BinaryReaderIR : public BinaryReaderNop {
  public:
-  BinaryReaderIR(Module* out_module, const char* filename, Errors* errors);
+  BinaryReaderIR(Module* out_module,
+                 const char* filename,
+                 Errors* errors,
+                 const ReadBinaryOptions& options);
 
   bool OnError(const Error&) override;
 
@@ -384,12 +387,18 @@ class BinaryReaderIR : public BinaryReaderNop {
 
   CodeMetadataExprQueue code_metadata_queue_;
   std::string_view current_metadata_name_;
+
+  const ReadBinaryOptions& options_;
 };
 
 BinaryReaderIR::BinaryReaderIR(Module* out_module,
                                const char* filename,
-                               Errors* errors)
-    : errors_(errors), module_(out_module), filename_(filename) {}
+                               Errors* errors,
+                               const ReadBinaryOptions& options)
+    : errors_(errors),
+      module_(out_module),
+      filename_(filename),
+      options_(options) {}
 
 Location BinaryReaderIR::GetLocation() const {
   Location loc;
@@ -1471,6 +1480,10 @@ Result BinaryReaderIR::SetMemoryName(Index index, std::string_view name) {
   if (name.empty()) {
     return Result::Ok;
   }
+  if (options_.no_sandbox && index > 0) {
+    PrintError("multiple memories used in no-sandbox mode");
+    return Result::Error;
+  }
   if (index >= module_->memories.size()) {
     PrintError("invalid memory index: %" PRIindex, index);
     return Result::Error;
@@ -1700,7 +1713,7 @@ Result ReadBinaryIr(const char* filename,
                     const ReadBinaryOptions& options,
                     Errors* errors,
                     Module* out_module) {
-  BinaryReaderIR reader(out_module, filename, errors);
+  BinaryReaderIR reader(out_module, filename, errors, options);
   return ReadBinary(data, size, &reader, options);
 }
 
