@@ -153,9 +153,9 @@ int ProgramMain(int argc, char** argv) {
     Module module;
     const bool kStopOnFirstError = true;
     const bool kFailOnCustomSectionError = true;
-    ReadBinaryOptions options(s_features, s_log_stream.get(),
-                              s_read_debug_names, kStopOnFirstError,
-                              kFailOnCustomSectionError);
+    ReadBinaryOptions options(
+        s_features, s_log_stream.get(), s_read_debug_names, kStopOnFirstError,
+        kFailOnCustomSectionError, s_write_c_options.no_sandbox);
     result = ReadBinaryIr(s_infile.c_str(), file_data.data(), file_data.size(),
                           options, &errors, &module);
     if (Succeeded(result)) {
