@@ -1302,6 +1302,7 @@ Result BinaryReaderIR::OnElemSegmentElemExprCount(Index index, Index count) {
   return Result::Ok;
 }
 
+<<<<<<< HEAD
 static Offset GetConstOffset(const ExprList& exprlist) {
   if (exprlist.size() != 1) {
     return kInvalidOffset;
@@ -1321,6 +1322,8 @@ static Offset GetConstOffset(const ExprList& exprlist) {
   }
 }
 
+=======
+>>>>>>> reloc-and-address-data
 Result BinaryReaderIR::OnElemSegmentElemExpr_RefNull(Index segment_index,
                                                      Type type) {
   assert(segment_index == module_->elem_segments.size() - 1);
@@ -1336,11 +1339,15 @@ Result BinaryReaderIR::OnElemSegmentElemExpr_RefFunc(Index segment_index,
                                                      Index func_index) {
   assert(segment_index == module_->elem_segments.size() - 1);
   ElemSegment* segment = module_->elem_segments[segment_index];
+<<<<<<< HEAD
   Offset entry_offset = segment->elem_exprs.size();
+=======
+>>>>>>> reloc-and-address-data
   Location loc = GetLocation();
   ExprList init_expr;
   init_expr.push_back(MakeUnique<RefFuncExpr>(Var(func_index, loc), loc));
   segment->elem_exprs.push_back(std::move(init_expr));
+<<<<<<< HEAD
   if (options_.no_sandbox) {
     Index table_index = segment->table_var.index();
     if (table_index != 0) {
@@ -1362,6 +1369,8 @@ Result BinaryReaderIR::OnElemSegmentElemExpr_RefFunc(Index segment_index,
         ->function_index_by_function_pointer_[segment_offset + entry_offset] =
         func_index;
   }
+=======
+>>>>>>> reloc-and-address-data
   return Result::Ok;
 }
 
@@ -1405,6 +1414,7 @@ Result BinaryReaderIR::OnDataSegmentData(Index index,
   segment->data.resize(size);
   if (size > 0) {
     memcpy(segment->data.data(), data, size);
+<<<<<<< HEAD
     if (options_.no_sandbox) {
       Offset segment_offset = GetConstOffset(segment->offset);
       if (segment_offset == kInvalidOffset) {
@@ -1417,6 +1427,8 @@ Result BinaryReaderIR::OnDataSegmentData(Index index,
       module_->data_segment_index_by_end_address_[segment_offset + size - 1] =
           index;
     }
+=======
+>>>>>>> reloc-and-address-data
   }
   return Result::Ok;
 }
@@ -1626,25 +1638,26 @@ Result BinaryReaderIR::OnReloc(RelocType type,
   switch (type) {
     case RelocType::TableIndexSLEB:
     case RelocType::TableIndexSLEB64:
-      module_->function_pointer_load_operand_offsets_.insert(offset);
+      module_->function_index_by_function_pointer_load_offset_[offset] = index;
       break;
     case RelocType::TableIndexI32:
-      module_->function_pointer_32_data_initializer_offsets_.insert(offset);
+      module_->function_index_by_fptr32_init_offset_[offset] = index;
       break;
     case RelocType::TableIndexI64:
-      module_->function_pointer_64_data_initializer_offsets_.insert(offset);
+      module_->function_index_by_fptr64_init_offset_[offset] = index;
       break;
     case RelocType::MemoryAddressSLEB:
     case RelocType::MemoryAddressSLEB64:
     case RelocType::MemoryAddressLEB:
     case RelocType::MemoryAddressLEB64:
-      module_->memory_address_operand_offsets_.insert(offset);
+      module_->data_segment_index_by_memory_pointer_load_offset_[offset] =
+          index;
       break;
     case RelocType::MemoryAddressI32:
-      module_->memory_address_32_data_initializer_offsets_.insert(offset);
+      module_->data_segment_index_by_mptr32_init_offset_[offset] = index;
       break;
     case RelocType::MemoryAddressI64:
-      module_->memory_address_64_data_initializer_offsets_.insert(offset);
+      module_->data_segment_index_by_mptr64_init_offset_[offset] = index;
       break;
     default:
       break;
