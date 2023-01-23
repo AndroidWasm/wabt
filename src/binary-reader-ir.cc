@@ -92,7 +92,10 @@ class CodeMetadataExprQueue {
 
 class BinaryReaderIR : public BinaryReaderNop {
  public:
-  BinaryReaderIR(Module* out_module, const char* filename, Errors* errors);
+  BinaryReaderIR(Module* out_module,
+                 const char* filename,
+                 Errors* errors,
+                 const ReadBinaryOptions& options);
 
   bool OnError(const Error&) override;
 
@@ -390,12 +393,18 @@ class BinaryReaderIR : public BinaryReaderNop {
 
   CodeMetadataExprQueue code_metadata_queue_;
   std::string_view current_metadata_name_;
+
+  const ReadBinaryOptions& options_;
 };
 
 BinaryReaderIR::BinaryReaderIR(Module* out_module,
                                const char* filename,
-                               Errors* errors)
-    : errors_(errors), module_(out_module), filename_(filename) {}
+                               Errors* errors,
+                               const ReadBinaryOptions& options)
+    : errors_(errors),
+      module_(out_module),
+      filename_(filename),
+      options_(options) {}
 
 Location BinaryReaderIR::GetLocation() const {
   Location loc;
@@ -1295,11 +1304,11 @@ Result BinaryReaderIR::OnElemSegmentElemExprCount(Index index, Index count) {
 
 static Offset GetConstOffset(const ExprList& exprlist) {
   if (exprlist.size() != 1) {
-    return -1;
+    return kInvalidOffset;
   }
   const Expr& expr = exprlist.front();
   if (expr.type() != ExprType::Const) {
-    return -1;
+    return kInvalidOffset;
   }
   const Const& c = cast<ConstExpr>(&expr)->const_;
   switch (c.type()) {
@@ -1308,7 +1317,7 @@ static Offset GetConstOffset(const ExprList& exprlist) {
     case Type::I64:
       return c.u64();
     default:
-      return -1;
+      return kInvalidOffset;
   }
 }
 
@@ -1327,13 +1336,28 @@ Result BinaryReaderIR::OnElemSegmentElemExpr_RefFunc(Index segment_index,
                                                      Index func_index) {
   assert(segment_index == module_->elem_segments.size() - 1);
   ElemSegment* segment = module_->elem_segments[segment_index];
-  Offset segment_offset = GetConstOffset(segment->offset);
   Offset entry_offset = segment->elem_exprs.size();
   Location loc = GetLocation();
   ExprList init_expr;
   init_expr.push_back(MakeUnique<RefFuncExpr>(Var(func_index, loc), loc));
   segment->elem_exprs.push_back(std::move(init_expr));
-  if (segment->table_var.index() == 0 && segment_offset > 0) {
+  if (options_.no_sandbox) {
+    Index table_index = segment->table_var.index();
+    if (table_index != 0) {
+      PrintError(
+          "More than one function table in no_sandbox mode.  Table index: "
+          "%" PRIindex,
+          table_index);
+      return Result::Error;
+    }
+    Offset segment_offset = GetConstOffset(segment->offset);
+    if (segment_offset == kInvalidOffset) {
+      PrintError(
+          "Non-constant offset for element segment in no_sandbox mode.  "
+          "Segment index: %" PRIindex,
+          segment_index);
+      return Result::Error;
+    }
     module_
         ->function_index_by_function_pointer_[segment_offset + entry_offset] =
         func_index;
@@ -1381,8 +1405,15 @@ Result BinaryReaderIR::OnDataSegmentData(Index index,
   segment->data.resize(size);
   if (size > 0) {
     memcpy(segment->data.data(), data, size);
-    Offset segment_offset = GetConstOffset(segment->offset);
-    if (segment_offset > 0) {
+    if (options_.no_sandbox) {
+      Offset segment_offset = GetConstOffset(segment->offset);
+      if (segment_offset == kInvalidOffset) {
+        PrintError(
+            "Non-constant data segment offset in no_sandbox mode.  Segment "
+            "index: %" PRIindex,
+            index);
+        return Result::Error;
+      }
       module_->data_segment_index_by_end_address_[segment_offset + size - 1] =
           index;
     }
@@ -1513,6 +1544,10 @@ Result BinaryReaderIR::SetMemoryName(Index index, std::string_view name) {
   if (name.empty()) {
     return Result::Ok;
   }
+  if (options_.no_sandbox && index > 0) {
+    PrintError("multiple memories used in no-sandbox mode");
+    return Result::Error;
+  }
   if (index >= module_->memories.size()) {
     PrintError("invalid memory index: %" PRIindex, index);
     return Result::Error;
@@ -1585,6 +1620,9 @@ Result BinaryReaderIR::OnReloc(RelocType type,
                                Offset offset,
                                Index index,
                                uint32_t addend) {
+  if (!options_.no_sandbox) {
+    return Result::Ok;
+  }
   switch (type) {
     case RelocType::TableIndexSLEB:
     case RelocType::TableIndexSLEB64:
@@ -1775,7 +1813,7 @@ Result ReadBinaryIr(const char* filename,
                     const ReadBinaryOptions& options,
                     Errors* errors,
                     Module* out_module) {
-  BinaryReaderIR reader(out_module, filename, errors);
+  BinaryReaderIR reader(out_module, filename, errors, options);
   return ReadBinary(data, size, &reader, options);
 }
 
