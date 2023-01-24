@@ -2478,20 +2478,21 @@ void CWriter::Write(const ExprList& exprs) {
         int index_byte_length = is64bit ? 10 : 5;
         Offset operand_reloc_offset =
             expr.loc.offset - index_byte_length - module_->code_section_base_;
-        auto& offsets = module_->function_pointer_load_operand_offsets_;
+        auto& reloc_map =
+            module_->function_reloc_by_function_pointer_load_offset_;
         PushType(const_.type());
-        if (options_.no_sandbox &&
-            offsets.find(operand_reloc_offset) != offsets.end()) {
-          uint64_t const_val = is64bit ? const_.u64() : const_.u32();
-          Index func_index =
-              module_->function_index_by_function_pointer_.at(const_val);
-          std::string& func_name = module_->funcs[func_index]->name;
-          Write(StackVar(0), " = reinterpret_cast<u", is64bit ? "64" : "32",
-                ">(&", GlobalName(ModuleFieldType::Func, func_name), ");",
-                Newline());
-        } else {
-          Write(StackVar(0), " = ", const_, ";", Newline());
+        if (options_.no_sandbox) {
+          auto entry_ptr = reloc_map.find(operand_reloc_offset);
+          if (entry_ptr != reloc_map.end()) {
+            Index func_index = entry_ptr->second;
+            std::string& func_name = module_->funcs[func_index]->name;
+            Write(StackVar(0), " = reinterpret_cast<u", is64bit ? "64" : "32",
+                  ">(&", GlobalName(ModuleFieldType::Func, func_name), ");",
+                  Newline());
+            break;
+          }
         }
+        Write(StackVar(0), " = ", const_, ";", Newline());
         break;
       }
 

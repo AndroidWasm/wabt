@@ -1304,28 +1304,6 @@ Result BinaryReaderIR::OnElemSegmentElemExprCount(Index index, Index count) {
   return Result::Ok;
 }
 
-<<<<<<< HEAD
-static Offset GetConstOffset(const ExprList& exprlist) {
-  if (exprlist.size() != 1) {
-    return kInvalidOffset;
-  }
-  const Expr& expr = exprlist.front();
-  if (expr.type() != ExprType::Const) {
-    return kInvalidOffset;
-  }
-  const Const& c = cast<ConstExpr>(&expr)->const_;
-  switch (c.type()) {
-    case Type::I32:
-      return c.u32();
-    case Type::I64:
-      return c.u64();
-    default:
-      return kInvalidOffset;
-  }
-}
-
-=======
->>>>>>> reloc-and-address-data
 Result BinaryReaderIR::OnElemSegmentElemExpr_RefNull(Index segment_index,
                                                      Type type) {
   assert(segment_index == module_->elem_segments.size() - 1);
@@ -1341,38 +1319,10 @@ Result BinaryReaderIR::OnElemSegmentElemExpr_RefFunc(Index segment_index,
                                                      Index func_index) {
   assert(segment_index == module_->elem_segments.size() - 1);
   ElemSegment* segment = module_->elem_segments[segment_index];
-<<<<<<< HEAD
-  Offset entry_offset = segment->elem_exprs.size();
-=======
->>>>>>> reloc-and-address-data
   Location loc = GetLocation();
   ExprList init_expr;
   init_expr.push_back(MakeUnique<RefFuncExpr>(Var(func_index, loc), loc));
   segment->elem_exprs.push_back(std::move(init_expr));
-<<<<<<< HEAD
-  if (options_.no_sandbox) {
-    Index table_index = segment->table_var.index();
-    if (table_index != 0) {
-      PrintError(
-          "More than one function table in no_sandbox mode.  Table index: "
-          "%" PRIindex,
-          table_index);
-      return Result::Error;
-    }
-    Offset segment_offset = GetConstOffset(segment->offset);
-    if (segment_offset == kInvalidOffset) {
-      PrintError(
-          "Non-constant offset for element segment in no_sandbox mode.  "
-          "Segment index: %" PRIindex,
-          segment_index);
-      return Result::Error;
-    }
-    module_
-        ->function_index_by_function_pointer_[segment_offset + entry_offset] =
-        func_index;
-  }
-=======
->>>>>>> reloc-and-address-data
   return Result::Ok;
 }
 
@@ -1416,21 +1366,6 @@ Result BinaryReaderIR::OnDataSegmentData(Index index,
   segment->data.resize(size);
   if (size > 0) {
     memcpy(segment->data.data(), data, size);
-<<<<<<< HEAD
-    if (options_.no_sandbox) {
-      Offset segment_offset = GetConstOffset(segment->offset);
-      if (segment_offset == kInvalidOffset) {
-        PrintError(
-            "Non-constant data segment offset in no_sandbox mode.  Segment "
-            "index: %" PRIindex,
-            index);
-        return Result::Error;
-      }
-      module_->data_segment_index_by_end_address_[segment_offset + size - 1] =
-          index;
-    }
-=======
->>>>>>> reloc-and-address-data
   }
   return Result::Ok;
 }
