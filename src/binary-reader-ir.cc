@@ -1700,6 +1700,7 @@ Result BinaryReaderIR::OnDataSymbol(Index index,
                                     Index segment,
                                     uint32_t offset,
                                     uint32_t size) {
+  module_->data_segment_index_by_symbol_index_[index] = segment;
   if (name.empty()) {
     return Result::Ok;
   }
@@ -1716,7 +1717,6 @@ Result BinaryReaderIR::OnDataSymbol(Index index,
     PrintError("invalid data segment index: %" PRIindex, segment);
     return Result::Error;
   }
-  module_->data_segment_index_by_symbol_index_[index] = segment;
   DataSegment* seg = module_->data_segments[segment];
   std::string dollar_name =
       GetUniqueName(&module_->data_segment_bindings, MakeDollarName(name));
