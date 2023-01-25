@@ -1700,22 +1700,22 @@ Result BinaryReaderIR::OnDataSymbol(Index index,
                                     Index segment,
                                     uint32_t offset,
                                     uint32_t size) {
-  module_->data_segment_index_by_symbol_index_[index] = segment;
-  if (name.empty()) {
-    return Result::Ok;
-  }
   if (flags & WABT_SYMBOL_FLAG_UNDEFINED) {
     // Refers to data in another file, `segment` not valid.
+    return Result::Ok;
+  }
+  if (segment >= module_->data_segments.size()) {
+    PrintError("invalid data segment index: %" PRIindex, segment);
+    return Result::Error;
+  }
+  module_->data_segment_index_by_symbol_index_[index] = segment;
+  if (name.empty()) {
     return Result::Ok;
   }
   if (offset) {
     // If it is pointing into the data segment, then it's not really naming
     // the whole segment.
     return Result::Ok;
-  }
-  if (segment >= module_->data_segments.size()) {
-    PrintError("invalid data segment index: %" PRIindex, segment);
-    return Result::Error;
   }
   DataSegment* seg = module_->data_segments[segment];
   std::string dollar_name =
@@ -1729,13 +1729,13 @@ Result BinaryReaderIR::OnFunctionSymbol(Index index,
                                         uint32_t flags,
                                         std::string_view name,
                                         Index func_index) {
-  module_->function_index_by_symbol_index_[index] = func_index;
-  if (name.empty()) {
-    return Result::Ok;
-  }
   if (func_index >= module_->funcs.size()) {
     PrintError("invalid function index: %" PRIindex, func_index);
     return Result::Error;
+  }
+  module_->function_index_by_symbol_index_[index] = func_index;
+  if (name.empty()) {
+    return Result::Ok;
   }
   Func* func = module_->funcs[func_index];
   if (!func->name.empty()) {
