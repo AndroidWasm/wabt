@@ -3440,6 +3440,7 @@ void CWriter::Write(const LoadExpr& expr) {
   // clang-format on
 
   Memory* memory = module_->memories[module_->GetMemoryIndex(expr.memidx)];
+  bool is64bit = memory->page_limits.is_64;
 
   Type result_type = expr.opcode.GetResultType();
   if (options_.no_sandbox) {
@@ -3449,8 +3450,27 @@ void CWriter::Write(const LoadExpr& expr) {
           ExternalInstancePtr(ModuleFieldType::Memory, memory->name),
           ", (u64)(", StackVar(0), ")");
   }
-  if (expr.offset != 0)
+  if (options_.no_sandbox) {
+    Write(" + ");
+    int index_byte_length = is64bit ? 10 : 5;
+    Offset operand_reloc_offset =
+        expr.loc.offset - index_byte_length - module_->code_section_base_;
+    auto& data_reloc_map = module_->data_reloc_by_memory_pointer_load_offset_;
+    auto data_reloc = data_reloc_map.find(operand_reloc_offset);
+    if (data_reloc != data_reloc_map.end()) {
+      auto& [data_segment_index, addend] = data_reloc->second;
+      std::string& data_segment_name =
+          module_->data_segments[data_segment_index]->name;
+      Write("reinterpret_cast<u", is64bit ? "64" : "32",
+            ">(&data_segment_data_",
+            GlobalName(ModuleFieldType::DataSegment, data_segment_name));
+      if (addend > 0) {
+        Write(" + ", addend);
+      }
+    }
+  } else if (expr.offset != 0) {
     Write(" + ", expr.offset, "u");
+  }
   Write(");", Newline());
   DropTypes(1);
   PushType(result_type);
