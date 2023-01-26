@@ -325,7 +325,8 @@ class CWriter {
   bool MaybeWriteNoSandboxFunctionAddress(Offset instruction_offset,
                                           bool is64bit);
   bool MaybeWriteNoSandboxMemoryAddress(Offset instruction_offset,
-                                        bool is64bit);
+                                        bool is64bit,
+                                        std::string prefix = "");
 
   void WriteSimpleUnaryExpr(Opcode, const char* op);
   void WriteInfixBinaryExpr(Opcode,
@@ -3402,7 +3403,8 @@ bool CWriter::MaybeWriteNoSandboxFunctionAddress(Offset instruction_offset,
 }
 
 bool CWriter::MaybeWriteNoSandboxMemoryAddress(Offset instruction_offset,
-                                               bool is64bit) {
+                                               bool is64bit,
+                                               std::string prefix) {
   int index_byte_length = is64bit ? 10 : 5;
   Offset reloc_offset =
       instruction_offset - index_byte_length - module_->code_section_base_;
@@ -3411,6 +3413,7 @@ bool CWriter::MaybeWriteNoSandboxMemoryAddress(Offset instruction_offset,
   if (data_reloc == data_reloc_map.end()) {
     return false;
   }
+  Write(prefix);
   auto [data_segment_index, addend] = data_reloc->second;
   std::string& data_segment_name =
       module_->data_segments[data_segment_index]->name;
