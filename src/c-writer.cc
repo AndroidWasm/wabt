@@ -3468,9 +3468,11 @@ void CWriter::Write(const LoadExpr& expr) {
   Type result_type = expr.opcode.GetResultType();
   if (options_.no_sandbox) {
     Write(StackVar(0, result_type), " = ", func, "((u64)(", StackVar(0),
-          ") + ");
-    if (!MaybeWriteNoSandboxMemoryAddress(expr.loc.offset, is64bit)) {
-      Write(expr.offset, "u");
+          ")");
+    if (!MaybeWriteNoSandboxMemoryAddress(expr.loc.offset, is64bit, " + ")) {
+      if (expr.offset != 0) {
+        Write(" + ", expr.offset, "u");
+      }
     }
   } else {
     Write(StackVar(0, result_type), " = ", func, "(",
