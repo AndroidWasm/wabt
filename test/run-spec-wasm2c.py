@@ -253,7 +253,6 @@ class CWriter(object):
 
     def _WriteModuleCommand(self, command):
         self.module_idx += 1
-        self.out_file.write('%s_init_module();\n' % self.GetModulePrefix())
         self._WriteModuleInitCall(command, False)
 
     def _WriteModuleInstances(self):
@@ -269,7 +268,6 @@ class CWriter(object):
 
     def _WriteAssertUninstantiableCommand(self, command):
         self.module_idx += 1
-        self.out_file.write('%s_init_module();\n' % self.GetModulePrefix())
         self._WriteModuleInitCall(command, True)
 
     def _WriteActionCommand(self, command):
@@ -442,7 +440,7 @@ def main(args):
     default_compiler = 'cc'
     if IS_WINDOWS:
         default_compiler = 'cl.exe'
-    default_compiler = os.getenv('CC', default_compiler)
+    default_compiler = os.getenv('WASM2C_CC', os.getenv('CC', default_compiler))
     parser = argparse.ArgumentParser()
     parser.add_argument('-o', '--out-dir', metavar='PATH',
                         help='output directory for files.')
