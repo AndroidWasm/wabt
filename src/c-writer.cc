@@ -320,6 +320,7 @@ class CWriter {
   void Write(const BinaryExpr&);
   void Write(const CompareExpr&);
   void Write(const ConvertExpr&);
+  void Write(const ConstExpr&);
   void Write(const LoadExpr&);
   void Write(const StoreExpr&);
   void Write(const UnaryExpr&);
@@ -2475,29 +2476,9 @@ void CWriter::Write(const ExprList& exprs) {
         Write(*cast<CompareExpr>(&expr));
         break;
 
-      case ExprType::Const: {
-        const Const& const_ = cast<ConstExpr>(&expr)->const_;
-        bool is64bit = const_.type() == Type::I64;
-        int index_byte_length = is64bit ? 10 : 5;
-        Offset operand_reloc_offset =
-            expr.loc.offset - index_byte_length - module_->code_section_base_;
-        auto& reloc_map =
-            module_->function_reloc_by_function_pointer_load_offset_;
-        PushType(const_.type());
-        if (options_.no_sandbox) {
-          auto entry_ptr = reloc_map.find(operand_reloc_offset);
-          if (entry_ptr != reloc_map.end()) {
-            Index func_index = entry_ptr->second;
-            std::string& func_name = module_->funcs[func_index]->name;
-            Write(StackVar(0), " = reinterpret_cast<u", is64bit ? "64" : "32",
-                  ">(&", GlobalName(ModuleFieldType::Func, func_name), ");",
-                  Newline());
-            break;
-          }
-        }
-        Write(StackVar(0), " = ", const_, ";", Newline());
+      case ExprType::Const:
+        Write(*cast<ConstExpr>(&expr));
         break;
-      }
 
       case ExprType::Convert:
         Write(*cast<ConvertExpr>(&expr));
@@ -3325,6 +3306,43 @@ void CWriter::Write(const ConvertExpr& expr) {
     default:
       WABT_UNREACHABLE;
   }
+}
+
+void CWriter::Write(const ConstExpr& expr) {
+  const Const& const_ = expr->const_;
+  bool is64bit = const_.type() == Type::I64;
+  int index_byte_length = is64bit ? 10 : 5;
+  Offset operand_reloc_offset =
+      expr.loc.offset - index_byte_length - module_->code_section_base_;
+  auto& function_reloc_map =
+      module_->function_reloc_by_function_pointer_load_offset_;
+  auto& data_reloc_map = module_->data_reloc_by_memory_pointer_load_offset_;
+  PushType(const_.type());
+  if (options_.no_sandbox) {
+    auto function_reloc = function_reloc_map.find(operand_reloc_offset);
+    if (function_reloc != function_reloc_map.end()) {
+      Index func_index = function_reloc->second;
+      std::string& func_name = module_->funcs[func_index]->name;
+      Write(StackVar(0), " = reinterpret_cast<u", is64bit ? "64" : "32", ">(&",
+            GlobalName(ModuleFieldType::Func, func_name), ");", Newline());
+      return;
+    }
+    auto data_reloc = data_reloc_map.find(operand_reloc_offset);
+    if (data_reloc != data_reloc_map.end()) {
+      auto& [data_segment_index, addend] = data_reloc->second;
+      std::string& data_segment_name =
+          module_->data_segments[data_segment_index]->name;
+      Write(StackVar(0), " = reinterpret_cast<u", is64bit ? "64" : "32",
+            ">(&data_segment_data_",
+            GlobalName(ModuleFieldType::DataSegment, data_segment_name));
+      if (addend > 0) {
+        Write(" + ", addend);
+      }
+      Write(");", Newline());
+      return;
+    }
+  }
+  Write(StackVar(0), " = ", const_, ";", Newline());
 }
 
 void CWriter::Write(const LoadExpr& expr) {
