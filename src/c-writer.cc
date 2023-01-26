@@ -3507,16 +3507,23 @@ void CWriter::Write(const StoreExpr& expr) {
   // clang-format on
 
   Memory* memory = module_->memories[module_->GetMemoryIndex(expr.memidx)];
+  bool is64bit = memory->page_limits.is_64;
 
+  Write(func, "(");
   if (options_.no_sandbox) {
-    Write(func, "((u64)(", StackVar(1), ")");
+    Write("(u64)(", StackVar(1), ")");
+    if (!MaybeWriteNoSandboxMemoryAddress(expr.loc.offset, is64bit, " + ")) {
+      if (expr.offset != 0) {
+        Write(" + ", expr.offset, "u");
+      }
+    }
   } else {
-    Write(func, "(", ExternalInstancePtr(ModuleFieldType::Memory, memory->name),
+    Write(ExternalInstancePtr(ModuleFieldType::Memory, memory->name),
           ", (u64)(", StackVar(1), ")");
+    if (expr.offset != 0) {
+      Write(" + ", expr.offset, "u");
+    }
   }
-
-  if (expr.offset != 0)
-    Write(" + ", expr.offset);
   Write(", ", StackVar(0), ");", Newline());
   DropTypes(2);
 }
