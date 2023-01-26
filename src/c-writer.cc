@@ -322,6 +322,11 @@ class CWriter {
     Allowed,
   };
 
+  bool MaybeWriteNoSandboxFunctionAddress(Offset instruction_offset,
+                                          bool is64bit);
+  bool MaybeWriteNoSandboxMemoryAddress(Offset instruction_offset,
+                                        bool is64bit);
+
   void WriteSimpleUnaryExpr(Opcode, const char* op);
   void WriteInfixBinaryExpr(Opcode,
                             const char* op,
@@ -3378,41 +3383,56 @@ void CWriter::Write(const ConvertExpr& expr) {
   }
 }
 
-void CWriter::Write(const ConstExpr& expr) {
-  const Const& const_ = expr->const_;
-  bool is64bit = const_.type() == Type::I64;
+bool CWriter::MaybeWriteNoSandboxFunctionAddress(Offset instruction_offset,
+                                                 bool is64bit) {
   int index_byte_length = is64bit ? 10 : 5;
-  Offset operand_reloc_offset =
-      expr.loc.offset - index_byte_length - module_->code_section_base_;
+  Offset reloc_offset =
+      instruction_offset - index_byte_length - module_->code_section_base_;
   auto& function_reloc_map =
       module_->function_reloc_by_function_pointer_load_offset_;
-  auto& data_reloc_map = module_->data_reloc_by_memory_pointer_load_offset_;
-  PushType(const_.type());
-  if (options_.no_sandbox) {
-    auto function_reloc = function_reloc_map.find(operand_reloc_offset);
-    if (function_reloc != function_reloc_map.end()) {
-      Index func_index = function_reloc->second;
-      std::string& func_name = module_->funcs[func_index]->name;
-      Write(StackVar(0), " = reinterpret_cast<u", is64bit ? "64" : "32", ">(&",
-            GlobalName(ModuleFieldType::Func, func_name), ");", Newline());
-      return;
-    }
-    auto data_reloc = data_reloc_map.find(operand_reloc_offset);
-    if (data_reloc != data_reloc_map.end()) {
-      auto& [data_segment_index, addend] = data_reloc->second;
-      std::string& data_segment_name =
-          module_->data_segments[data_segment_index]->name;
-      Write(StackVar(0), " = reinterpret_cast<u", is64bit ? "64" : "32",
-            ">(&data_segment_data_",
-            GlobalName(ModuleFieldType::DataSegment, data_segment_name));
-      if (addend > 0) {
-        Write(" + ", addend);
-      }
-      Write(");", Newline());
-      return;
-    }
+  auto function_reloc = function_reloc_map.find(reloc_offset);
+  if (function_reloc == function_reloc_map.end()) {
+    return false;
   }
-  Write(StackVar(0), " = ", const_, ";", Newline());
+  Index func_index = function_reloc->second;
+  std::string& func_name = module_->funcs[func_index]->name;
+  Write("reinterpret_cast<u", is64bit ? "64" : "32", ">(&",
+        GlobalName(ModuleFieldType::Func, func_name), ")");
+  return true;
+}
+
+bool CWriter::MaybeWriteNoSandboxMemoryAddress(Offset instruction_offset,
+                                               bool is64bit) {
+  int index_byte_length = is64bit ? 10 : 5;
+  Offset reloc_offset =
+      instruction_offset - index_byte_length - module_->code_section_base_;
+  auto& data_reloc_map = module_->data_reloc_by_memory_pointer_load_offset_;
+  auto data_reloc = data_reloc_map.find(reloc_offset);
+  if (data_reloc == data_reloc_map.end()) {
+    return false;
+  }
+  auto [data_segment_index, addend] = data_reloc->second;
+  std::string& data_segment_name =
+      module_->data_segments[data_segment_index]->name;
+  Write("reinterpret_cast<u", is64bit ? "64" : "32", ">(&data_segment_data_",
+        GlobalName(ModuleFieldType::DataSegment, data_segment_name), ")");
+  if (addend > 0) {
+    Write(" + ", addend, "u");
+  }
+  return true;
+}
+
+void CWriter::Write(const ConstExpr& expr) {
+  const Const& const_ = expr.const_;
+  bool is64bit = const_.type() == Type::I64;
+  PushType(const_.type());
+  Write(StackVar(0), " = ");
+  if (options_.no_sandbox &&
+      !MaybeWriteNoSandboxFunctionAddress(expr.loc.offset, is64bit) &&
+      !MaybeWriteNoSandboxMemoryAddress(expr.loc.offset, is64bit)) {
+    Write(const_);
+  }
+  Write(";", Newline());
 }
 
 void CWriter::Write(const LoadExpr& expr) {
