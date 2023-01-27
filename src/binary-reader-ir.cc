@@ -1565,6 +1565,26 @@ Result BinaryReaderIR::OnNameEntry(NameSectionSubsection type,
   return Result::Ok;
 }
 
+Result BinaryReaderIR::ValidateFunctionSymbol(Index symbol_index) {
+  if (module_->function_symbols_.find(symbol_index) ==
+      module_->function_symbols_.end()) {
+    PrintError("unexpected function symbol with index %u\n", symbol_index);
+    return Result::Error;
+  }
+  return Result::Ok;
+}
+
+Result BinaryReaderIR::ValidateDataSegmentSymbol(Index symbol_index) {
+  if (module_->data_symbols_.find(symbol_index) ==
+          module_->data_symbols_.end() &&
+      module_->undefined_data_symbols_.find(symbol_index) ==
+          module_->undefined_data_symbols_.end()) {
+    PrintError("unexpected data segment symbol with index %u\n", symbol_index);
+    return Result::Error;
+  }
+  return Result::Ok;
+}
+
 Result BinaryReaderIR::OnReloc(RelocType type,
                                Offset offset,
                                Index index,
@@ -1575,26 +1595,32 @@ Result BinaryReaderIR::OnReloc(RelocType type,
   switch (type) {
     case RelocType::TableIndexSLEB:
     case RelocType::TableIndexSLEB64:
+      CHECK_RESULT(ValidateFunctionSymbol(index));
       module_->function_symbol_by_function_pointer_load_offset_[offset] = index;
       break;
     case RelocType::TableIndexI32:
+      CHECK_RESULT(ValidateFunctionSymbol(index));
       module_->function_symbol_by_fptr32_init_offset_[offset] = index;
       break;
     case RelocType::TableIndexI64:
+      CHECK_RESULT(ValidateFunctionSymbol(index));
       module_->function_symbol_by_fptr64_init_offset_[offset] = index;
       break;
     case RelocType::MemoryAddressSLEB:
     case RelocType::MemoryAddressSLEB64:
     case RelocType::MemoryAddressLEB:
     case RelocType::MemoryAddressLEB64:
+      CHECK_RESULT(ValidateDataSegmentSymbol(index));
       module_->data_symbol_and_addend_by_memory_pointer_load_offset_[offset] =
           std::make_pair(index, addend);
       break;
     case RelocType::MemoryAddressI32:
+      CHECK_RESULT(ValidateDataSegmentSymbol(index));
       module_->data_symbol_and_addend_by_mptr32_init_offset_[offset] =
           std::make_pair(index, addend);
       break;
     case RelocType::MemoryAddressI64:
+      CHECK_RESULT(ValidateDataSegmentSymbol(index));
       module_->data_symbol_and_addend_by_mptr64_init_offset_[offset] =
           std::make_pair(index, addend);
       break;
