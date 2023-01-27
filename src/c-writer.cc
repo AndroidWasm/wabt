@@ -3390,12 +3390,13 @@ bool CWriter::MaybeWriteNoSandboxFunctionAddress(Offset instruction_offset,
   Offset reloc_offset =
       instruction_offset - index_byte_length - module_->code_section_base_;
   auto& function_reloc_map =
-      module_->function_reloc_by_function_pointer_load_offset_;
+      module_->function_symbol_by_function_pointer_load_offset_;
   auto function_reloc = function_reloc_map.find(reloc_offset);
   if (function_reloc == function_reloc_map.end()) {
     return false;
   }
-  Index func_index = function_reloc->second;
+  Index symbol_index = function_reloc->second;
+  Index func_index = module_->function_symbols_.at(symbol_index);
   std::string& func_name = module_->funcs[func_index]->name;
   Write("reinterpret_cast<u", is64bit ? "64" : "32", ">(&",
         GlobalName(ModuleFieldType::Func, func_name), ")");
@@ -3408,17 +3409,27 @@ bool CWriter::MaybeWriteNoSandboxMemoryAddress(Offset instruction_offset,
   int index_byte_length = is64bit ? 10 : 5;
   Offset reloc_offset =
       instruction_offset - index_byte_length - module_->code_section_base_;
-  auto& data_reloc_map = module_->data_reloc_by_memory_pointer_load_offset_;
+  auto& data_reloc_map =
+      module_->data_symbol_and_addend_by_memory_pointer_load_offset_;
   auto data_reloc = data_reloc_map.find(reloc_offset);
   if (data_reloc == data_reloc_map.end()) {
     return false;
   }
-  Write(prefix);
-  auto [data_segment_index, addend] = data_reloc->second;
-  std::string& data_segment_name =
-      module_->data_segments[data_segment_index]->name;
-  Write("reinterpret_cast<u", is64bit ? "64" : "32", ">(&data_segment_data_",
-        GlobalName(ModuleFieldType::DataSegment, data_segment_name), ")");
+  Write(prefix, "reinterpret_cast<u", is64bit ? "64" : "32", ">(&");
+  auto [data_symbol_index, addend] = data_reloc->second;
+  auto data_segment_index_ptr = module_->data_symbols_.find(data_symbol_index);
+  if (data_segment_index_ptr != module_->data_symbols_.end()) {
+    const std::string& external_name =
+        module_->undefined_data_symbols_.at(data_symbol_index);
+    Write(external_name);
+  } else {
+    Index data_segment_index = data_segment_index_ptr->second;
+    std::string& data_segment_name =
+        module_->data_segments[data_segment_index]->name;
+    Write("data_segment_data_",
+          GlobalName(ModuleFieldType::DataSegment, data_segment_name));
+  }
+  Write(")");
   if (addend > 0) {
     Write(" + ", addend, "u");
   }

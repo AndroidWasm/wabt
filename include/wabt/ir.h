@@ -1255,35 +1255,40 @@ struct Module {
 
   // Mappings from a symbol index (pointing into the symbol table from the
   // "linking" section) to their corresponding function- and data segment index.
-  std::unordered_map<Index, Index> function_index_by_symbol_index_;
-  std::unordered_map<Index, Index> data_segment_index_by_symbol_index_;
+  std::unordered_map<Index, Index> function_symbols_;
+  std::unordered_map<Index, Index> data_symbols_;
+
+  // Mapping from a data symbol index to its name.  This mapping is only
+  // constructed for data symbols that are marked undefined.
+  std::unordered_map<Index, std::string> undefined_data_symbols_;
 
   // Mapping from offsets of function pointer loads (operands of ixx.const
   // instructions) to their correpsonding function relocation information,
-  // represented simply by the function index.
+  // represented simply by the function symbol index.
   std::unordered_map<Offset, Index>
-      function_reloc_by_function_pointer_load_offset_;
+      function_symbol_by_function_pointer_load_offset_;
 
   // Mappings (ordered) from offsets of 32- and 64-bit function pointers within
   // global data initializers to their corresponding function relocation
-  // information, represented simply by the function index.
-  std::map<Offset, Index> function_reloc_by_fptr32_init_offset_;
-  std::map<Offset, Index> function_reloc_by_fptr64_init_offset_;
+  // information, represented simply by the function symbol index.
+  std::map<Offset, Index> function_symbol_by_fptr32_init_offset_;
+  std::map<Offset, Index> function_symbol_by_fptr64_init_offset_;
 
   // Mapping from offsets of memory pointer loads (operands of ixx.const
   // instructions) to their corresponding data relocation information,
-  // represented by a pair consisting of the data segment index and the offset.
+  // represented by a pair consisting of the data segment symbol index and the
+  // offset.
   std::unordered_map<Offset, std::pair<Index, uint32_t>>
-      data_reloc_by_memory_pointer_load_offset_;
+      data_symbol_and_addend_by_memory_pointer_load_offset_;
 
   // Mapping from (ordered) offsets of 32- and 64-bit memory pointers within
   // global data initializers to their corresponding data relocation
-  // information, represented by a pair consisting of the data segment index and
-  // the offset.
+  // information, represented by a pair consisting of the data segment symbol
+  // index and the offset.
   std::map<Offset, std::pair<Index, uint32_t>>
-      data_reloc_by_mptr32_init_offset_;
+      data_symbol_and_addend_by_mptr32_init_offset_;
   std::map<Offset, std::pair<Index, uint32_t>>
-      data_reloc_by_mptr64_init_offset_;
+      data_symbol_and_addend_by_mptr64_init_offset_;
 };
 
 enum class ScriptModuleType {
