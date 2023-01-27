@@ -3418,7 +3418,7 @@ bool CWriter::MaybeWriteNoSandboxMemoryAddress(Offset instruction_offset,
   Write(prefix, "reinterpret_cast<u", is64bit ? "64" : "32", ">(&");
   auto [data_symbol_index, addend] = data_reloc->second;
   auto data_segment_index_ptr = module_->data_symbols_.find(data_symbol_index);
-  if (data_segment_index_ptr != module_->data_symbols_.end()) {
+  if (data_segment_index_ptr == module_->data_symbols_.end()) {
     const std::string& external_name =
         module_->undefined_data_symbols_.at(data_symbol_index);
     Write(external_name);
