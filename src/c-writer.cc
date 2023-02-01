@@ -3466,9 +3466,9 @@ void CWriter::Write(const ConstExpr& expr) {
   bool is64bit = const_.type() == Type::I64;
   PushType(const_.type());
   Write(StackVar(0), " = ");
-  if (options_.no_sandbox &&
-      !MaybeWriteNoSandboxFunctionAddress(expr.loc.offset, is64bit) &&
-      !MaybeWriteNoSandboxMemoryAddress(expr.loc.offset, is64bit)) {
+  if (!options_.no_sandbox ||
+      (!MaybeWriteNoSandboxFunctionAddress(expr.loc.offset, is64bit) &&
+       !MaybeWriteNoSandboxMemoryAddress(expr.loc.offset, is64bit))) {
     Write(const_);
   }
   Write(";", Newline());
