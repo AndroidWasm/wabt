@@ -327,6 +327,10 @@ class CWriter {
   bool MaybeWriteNoSandboxMemoryAddress(Offset instruction_offset,
                                         bool is64bit,
                                         std::string prefix = "");
+  void WriteMemoryAddress(Index stack_index,
+                          const Memory* memory,
+                          size_t loc_offset,
+                          Address offset);
 
   void WriteSimpleUnaryExpr(Opcode, const char* op);
   void WriteInfixBinaryExpr(Opcode,
@@ -3436,6 +3440,27 @@ bool CWriter::MaybeWriteNoSandboxMemoryAddress(Offset instruction_offset,
   return true;
 }
 
+void CWriter::WriteMemoryAddress(Index stack_index,
+                                 const Memory* memory,
+                                 size_t loc_offset,
+                                 Address offset) {
+  if (options_.no_sandbox) {
+    Write("(u64)(", StackVar(stack_index), ")");
+    if (!MaybeWriteNoSandboxMemoryAddress(loc_offset, memory->page_limits.is_64,
+                                          " + ")) {
+      if (offset != 0) {
+        Write(" + ", offset, "u");
+      }
+    }
+  } else {
+    Write(ExternalInstancePtr(ModuleFieldType::Memory, memory->name),
+          ", (u64)(", StackVar(stack_index), ")");
+    if (offset != 0) {
+      Write(" + ", offset, "u");
+    }
+  }
+}
+
 void CWriter::Write(const ConstExpr& expr) {
   const Const& const_ = expr.const_;
   bool is64bit = const_.type() == Type::I64;
@@ -3474,25 +3499,10 @@ void CWriter::Write(const LoadExpr& expr) {
   // clang-format on
 
   Memory* memory = module_->memories[module_->GetMemoryIndex(expr.memidx)];
-  bool is64bit = memory->page_limits.is_64;
 
   Type result_type = expr.opcode.GetResultType();
-  if (options_.no_sandbox) {
-    Write(StackVar(0, result_type), " = ", func, "((u64)(", StackVar(0),
-          ")");
-    if (!MaybeWriteNoSandboxMemoryAddress(expr.loc.offset, is64bit, " + ")) {
-      if (expr.offset != 0) {
-        Write(" + ", expr.offset, "u");
-      }
-    }
-  } else {
-    Write(StackVar(0, result_type), " = ", func, "(",
-          ExternalInstancePtr(ModuleFieldType::Memory, memory->name),
-          ", (u64)(", StackVar(0), ")");
-    if (expr.offset != 0) {
-      Write(" + ", expr.offset, "u");
-    }
-  }
+  Write(StackVar(0, result_type), " = ", func, "(");
+  WriteMemoryAddress(0, memory, expr.loc.offset, expr.offset);
   Write(");", Newline());
   DropTypes(1);
   PushType(result_type);
@@ -3518,23 +3528,9 @@ void CWriter::Write(const StoreExpr& expr) {
   // clang-format on
 
   Memory* memory = module_->memories[module_->GetMemoryIndex(expr.memidx)];
-  bool is64bit = memory->page_limits.is_64;
 
   Write(func, "(");
-  if (options_.no_sandbox) {
-    Write("(u64)(", StackVar(1), ")");
-    if (!MaybeWriteNoSandboxMemoryAddress(expr.loc.offset, is64bit, " + ")) {
-      if (expr.offset != 0) {
-        Write(" + ", expr.offset, "u");
-      }
-    }
-  } else {
-    Write(ExternalInstancePtr(ModuleFieldType::Memory, memory->name),
-          ", (u64)(", StackVar(1), ")");
-    if (expr.offset != 0) {
-      Write(" + ", expr.offset, "u");
-    }
-  }
+  WriteMemoryAddress(1, memory, expr.loc.offset, expr.offset);
   Write(", ", StackVar(0), ");", Newline());
   DropTypes(2);
 }
@@ -3717,11 +3713,8 @@ void CWriter::Write(const LoadSplatExpr& expr) {
   Memory* memory = module_->memories[0];
 
   Type result_type = expr.opcode.GetResultType();
-  Write(StackVar(0, result_type), " = ", expr.opcode.GetName(), "(",
-        ExternalInstancePtr(ModuleFieldType::Memory, memory->name), ", (u64)(",
-        StackVar(0));
-  if (expr.offset != 0)
-    Write(" + ", expr.offset);
+  Write(StackVar(0, result_type), " = ", expr.opcode.GetName(), "(");
+  WriteMemoryAddress(0, memory, expr.loc.offset, expr.offset);
   Write("));", Newline());
   DropTypes(1);
   PushType(result_type);
