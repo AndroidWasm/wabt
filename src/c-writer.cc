@@ -322,11 +322,11 @@ class CWriter {
     Allowed,
   };
 
-  bool MaybeWriteNoSandboxFunctionAddress(Offset instruction_offset,
-                                          bool is64bit);
-  bool MaybeWriteNoSandboxMemoryAddress(Offset instruction_offset,
-                                        bool is64bit,
-                                        std::string prefix = "");
+  bool TryWriteNoSandboxFunctionAddress(Offset instruction_offset,
+                                        bool is64bit);
+  bool TryWriteNoSandboxMemoryAddress(Offset instruction_offset,
+                                      bool is64bit,
+                                      const std::string& prefix = "");
 
   void WriteSimpleUnaryExpr(Opcode, const char* op);
   void WriteInfixBinaryExpr(Opcode,
@@ -3384,8 +3384,10 @@ void CWriter::Write(const ConvertExpr& expr) {
   }
 }
 
-bool CWriter::MaybeWriteNoSandboxFunctionAddress(Offset instruction_offset,
-                                                 bool is64bit) {
+bool CWriter::TryWriteNoSandboxFunctionAddress(Offset instruction_offset,
+                                               bool is64bit) {
+  // For i32.const the constant value is encoded as a 5-byte varint32;
+  // for i64.const it is a 10-byte varint64.
   int index_byte_length = is64bit ? 10 : 5;
   Offset reloc_offset =
       instruction_offset - index_byte_length - module_->code_section_base_;
@@ -3397,19 +3399,21 @@ bool CWriter::MaybeWriteNoSandboxFunctionAddress(Offset instruction_offset,
   }
   Index symbol_index = function_reloc->second;
   Index func_index = module_->function_symbols_.at(symbol_index);
-  std::string& func_name = module_->funcs[func_index]->name;
+  const std::string& func_name = module_->funcs[func_index]->name;
   Write("reinterpret_cast<u", is64bit ? "64" : "32", ">(&",
         GlobalName(ModuleFieldType::Func, func_name), ")");
   return true;
 }
 
-bool CWriter::MaybeWriteNoSandboxMemoryAddress(Offset instruction_offset,
-                                               bool is64bit,
-                                               std::string prefix) {
+bool CWriter::TryWriteNoSandboxMemoryAddress(Offset instruction_offset,
+                                             bool is64bit,
+                                             const std::string& prefix) {
+  // For i32.{load*,store} the offset is encoded as a 5-byte varuint32;
+  // for the i64.* variety it is a 10-byte varuint64.
   int index_byte_length = is64bit ? 10 : 5;
   Offset reloc_offset =
       instruction_offset - index_byte_length - module_->code_section_base_;
-  auto& data_reloc_map =
+  const auto& data_reloc_map =
       module_->data_symbol_and_addend_by_memory_pointer_load_offset_;
   auto data_reloc = data_reloc_map.find(reloc_offset);
   if (data_reloc == data_reloc_map.end()) {
@@ -3424,7 +3428,7 @@ bool CWriter::MaybeWriteNoSandboxMemoryAddress(Offset instruction_offset,
     Write(external_name);
   } else {
     Index data_segment_index = data_segment_index_ptr->second;
-    std::string& data_segment_name =
+    const std::string& data_segment_name =
         module_->data_segments[data_segment_index]->name;
     Write("data_segment_data_",
           GlobalName(ModuleFieldType::DataSegment, data_segment_name));
@@ -3442,8 +3446,8 @@ void CWriter::Write(const ConstExpr& expr) {
   PushType(const_.type());
   Write(StackVar(0), " = ");
   if (!options_.no_sandbox ||
-      (!MaybeWriteNoSandboxFunctionAddress(expr.loc.offset, is64bit) &&
-       !MaybeWriteNoSandboxMemoryAddress(expr.loc.offset, is64bit))) {
+      (!TryWriteNoSandboxFunctionAddress(expr.loc.offset, is64bit) &&
+       !TryWriteNoSandboxMemoryAddress(expr.loc.offset, is64bit))) {
     Write(const_);
   }
   Write(";", Newline());
