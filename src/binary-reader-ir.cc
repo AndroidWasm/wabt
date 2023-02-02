@@ -292,6 +292,7 @@ class BinaryReaderIR : public BinaryReaderNop {
   Result OnElemSegmentElemExpr_RefFunc(Index segment_index,
                                        Index func_index) override;
 
+  Result BeginDataSection(Offset size) override;
   Result OnDataSegmentCount(Index count) override;
   Result BeginDataSegment(Index index,
                           Index memory_index,
@@ -1326,6 +1327,11 @@ Result BinaryReaderIR::OnElemSegmentElemExpr_RefFunc(Index segment_index,
   return Result::Ok;
 }
 
+Result BinaryReaderIR::BeginDataSection(Offset size) {
+  module_->data_section_base_ = GetLocation().offset;
+  return Result::Ok;
+}
+
 Result BinaryReaderIR::OnDataSegmentCount(Index count) {
   WABT_TRY
   module_->data_segments.reserve(count);
@@ -1358,6 +1364,24 @@ Result BinaryReaderIR::EndDataSegmentInitExpr(Index index) {
   return EndInitExpr();
 }
 
+static Offset GetDataSegmentOffset(const DataSegment* data_segment) {
+  if (data_segment->offset.size() != 1) {
+    return kInvalidOffset;
+  }
+  const auto& expr = *data_segment->offset.begin();
+  if (expr.type() != ExprType::Const) {
+    return kInvalidOffset;
+  }
+  const Const& const_ = cast<ConstExpr>(&expr)->const_;
+  // clang-format off
+  switch (const_.type()) {
+    case Type::I32: return const_.u32();
+    case Type::I64: return const_.u64();
+    default: return kInvalidOffset;
+  }
+  // clang-format on
+}
+
 Result BinaryReaderIR::OnDataSegmentData(Index index,
                                          const void* data,
                                          Address size) {
@@ -1366,6 +1390,18 @@ Result BinaryReaderIR::OnDataSegmentData(Index index,
   segment->data.resize(size);
   if (size > 0) {
     memcpy(segment->data.data(), data, size);
+  }
+  if (options_.no_sandbox) {
+    Offset offset = GetDataSegmentOffset(segment);
+    if (offset == kInvalidOffset) {
+      PrintError(
+          "non-constant data offset in no-sandbox mode, data segment "
+          "%" PRIindex,
+          index);
+      return Result::Error;
+    }
+    module_->data_segment_base_by_offset_[segment->memory_var.loc.offset] =
+        offset;
   }
   return Result::Ok;
 }
