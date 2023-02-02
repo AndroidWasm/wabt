@@ -1258,6 +1258,8 @@ struct Module {
   std::unordered_map<Index, Index> function_symbols_;
   std::unordered_map<Index, Index> data_symbols_;
 
+  std::map<Offset, Offset> data_segment_base_by_offset_;
+
   // Mapping from a data symbol index to its name.  This mapping is only
   // constructed for data symbols that are marked undefined.
   std::unordered_map<Index, std::string> undefined_data_symbols_;
