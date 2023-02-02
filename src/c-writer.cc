@@ -1494,24 +1494,6 @@ void CWriter::WriteDataInstances() {
   }
 }
 
-static Offset GetDataSegmentOffset(const DataSegment* data_segment) {
-  if (data_segment->offset.size() != 1) {
-    return kInvalidOffset;
-  }
-  const auto& expr = *data_segment->offset.begin();
-  if (expr.type() != ExprType::Const) {
-    return kInvalidOffset;
-  }
-  const Const& const_ = cast<ConstExpr>(&expr)->const_;
-  // clang-format off
-  switch (const_.type()) {
-    case Type::I32: return const_.u32();
-    case Type::I64: return const_.u64();
-    default: return kInvalidOffset;
-  }
-  // clang-format on
-}
-
 void CWriter::WriteNoSandboxDataSegments() {
   for (const DataSegment* data_segment : module_->data_segments) {
     if (data_segment->data.empty()) {
@@ -1520,11 +1502,7 @@ void CWriter::WriteNoSandboxDataSegments() {
     if (is_droppable(data_segment)) {
       UNIMPLEMENTED("droppable data segment in no-sandbox mode");
     }
-    Offset base = GetDataSegmentOffset(data_segment);
-    if (base == kInvalidOffset) {
-      UNIMPLEMENTED(
-          "data segment with non-constant base address in no-sandbox mode");
-    }
+    Offset base = module_->data_segment_base_by_offset_.at(data_segment->memory_var.loc.offset);
     Offset ceiling = base + data_segment->data.size();
 
     // Survey the data initialiser relocation maps.
