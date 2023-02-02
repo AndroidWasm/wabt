@@ -1249,14 +1249,20 @@ struct Module {
   BindingHash data_segment_bindings;
   BindingHash elem_segment_bindings;
 
-  // Byte offset of the beginning of the CODE section, after its section
-  // identifier.
+  // Byte offset of the beginning of the CODE section and DATA sections, after
+  // their section identifiers.
   Offset code_section_base_;
+  Offset data_section_base_;
 
   // Mappings from a symbol index (pointing into the symbol table from the
   // "linking" section) to their corresponding function- and data segment index.
   std::unordered_map<Index, Index> function_symbols_;
   std::unordered_map<Index, Index> data_symbols_;
+
+  // Mapping from the encoding offset of a data segment var (in the module
+  // encoding) to the corresponding base address (relative to the beginning of
+  // WASM memory).
+  std::map<Offset, Offset> data_segment_base_by_offset_;
 
   // Mapping from a data symbol index to its name.  This mapping is only
   // constructed for data symbols that are marked undefined.
