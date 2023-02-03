@@ -1508,7 +1508,9 @@ void CWriter::WriteDataInstances() {
   }
 }
 
-void CWriter::WriteBytes(const DataSegment* segment, size_t start_index, size_t end_index) {
+void CWriter::WriteBytes(const DataSegment* segment,
+                         size_t start_index,
+                         size_t end_index) {
   Write(OpenBrace());
   for (size_t i = start_index; i < end_index; ++i) {
     Writef("0x%02x,", segment->data.at(i));
