@@ -292,6 +292,9 @@ class CWriter {
   void WriteTable(const std::string&, const wabt::Type&);
   void WriteTablePtr(const std::string&, const Table&);
   void WriteTableType(const wabt::Type&);
+  void WriteBytes(const DataSegment* segment,
+                  size_t start_index,
+                  size_t end_index);
   void WriteDataInstances();
   void WriteElemInstances();
   void WriteGlobalInitializers();
@@ -1503,6 +1506,22 @@ void CWriter::WriteDataInstances() {
   }
 }
 
+void CWriter::WriteBytes(const DataSegment* segment, size_t start_index, size_t end_index) {
+  Write(OpenBrace());
+  for (size_t i = start_index; i < end_index; ++i) {
+    Writef("0x%02x,", segment->data.at(i));
+    if ((i - start_index + 1) % 12 == 0) {
+      Write(Newline());
+    } else if (i < end_index - 1) {
+      Write(" ");
+    }
+  }
+  if ((end_index - start_index) % 12 != 0) {
+    Write(Newline());
+  }
+  Write(CloseBrace());
+}
+
 void CWriter::WriteNoSandboxDataSegments() {
   for (const DataSegment* data_segment : module_->data_segments) {
     if (data_segment->data.empty()) {
@@ -1564,46 +1583,81 @@ void CWriter::WriteNoSandboxDataSegments() {
     if (reloc_map.empty()) {
       Write(Newline(), "static const u8 data_segment_data_",
             GlobalName(ModuleFieldType::DataSegment, data_segment->name),
-            "[] = ", OpenBrace());
-      size_t i = 0;
-      for (uint8_t x : data_segment->data) {
-        Writef("0x%02x, ", x);
-        if ((++i % 12) == 0) {
-          Write(Newline());
-        }
-      }
-      if (i > 0) {
-        Write(Newline());
-      }
-      Write(CloseBrace(), ";", Newline());
+            "[] = ");
+      WriteBytes(data_segment, 0, data_segment->data.size());
+      Write(";", Newline());
       continue;
     }
 
     Write(Newline(), "static const struct ", OpenBrace());
-    Offset cur = base;
-    while (cur < ceiling) {
-      auto next_reloc = reloc_map.lower_bound(cur);
-      Offset next =
-          next_reloc == reloc_map.end() || next_reloc->first >= ceiling
-              ? ceiling
-              : next_reloc->first;
-      if (next != cur) {
-        Write("u8 plain_data_at_", cur - base, "[", next - cur, "];",
-              Newline());
+    {
+      Offset cur = base;
+      while (cur < ceiling) {
+        auto next_reloc = reloc_map.lower_bound(cur);
+        Offset next =
+            next_reloc == reloc_map.end() || next_reloc->first >= ceiling
+                ? ceiling
+                : next_reloc->first;
+        if (next != cur) {
+          Write("u8 plain_data_at_", cur - base, "[", next - cur, "];",
+                Newline());
+        }
+        if (next < ceiling) {
+          bool is_function = next_reloc->second;
+          Write(is64bit ? "u64" : "u32", " ", is_function ? "function" : "data",
+                "_pointer_at_", next - base, ";", Newline());
+          next += is64bit ? 8 : 4;
+        }
+        cur = next;
       }
-      if (next < ceiling) {
-        bool is_function = next_reloc->second;
-        Write(is64bit ? "u64" : "u32", " ", is_function ? "function" : "data",
-              "_pointer_at_", next - base, ";", Newline());
-        next += is64bit ? 8 : 4;
-      }
-      cur = next;
     }
 
     Write(CloseBrace(), " data_segment_data_",
           GlobalName(ModuleFieldType::DataSegment, data_segment->name), " = ",
-          OpenBrace(), Newline());
-    Write("...", Newline());
+          OpenBrace());
+    {
+      Offset cur = base;
+      while (cur < ceiling) {
+        auto next_reloc = reloc_map.lower_bound(cur);
+        Offset next =
+            next_reloc == reloc_map.end() || next_reloc->first >= ceiling
+                ? ceiling
+                : next_reloc->first;
+        if (next != cur) {
+          WriteBytes(data_segment, cur - base, next - base);
+          Write(",", Newline());
+        }
+        if (next < ceiling) {
+          bool is_function = next_reloc->second;
+          Write("reinterpret_cast<u", is64bit ? "64" : "32", ">(&");
+          if (is_function) {
+            Index symbol_index = fmap.at(next);
+            Index func_index = module_->function_symbols_.at(symbol_index);
+            const std::string& func_name = module_->funcs[func_index]->name;
+            Write(GlobalName(ModuleFieldType::Func, func_name));
+          } else {
+            auto [data_symbol_index, addend] = dmap.at(next);
+            auto data_segment_index_ptr =
+                module_->data_symbols_.find(data_symbol_index);
+            if (data_segment_index_ptr == module_->data_symbols_.end()) {
+              const std::string& external_name =
+                  module_->undefined_data_symbols_.at(data_symbol_index);
+              Write(external_name);
+            } else {
+              Index data_segment_index = data_segment_index_ptr->second;
+              const std::string& data_segment_name =
+                  module_->data_segments[data_segment_index]->name;
+              Write(
+                  "data_segment_data_",
+                  GlobalName(ModuleFieldType::DataSegment, data_segment_name));
+            }
+          }
+          Write("),", Newline());
+          next += is64bit ? 8 : 4;
+        }
+        cur = next;
+      }
+    }
     Write(CloseBrace(), ";", Newline());
   }
 }
@@ -1624,16 +1678,9 @@ void CWriter::WriteDataInitializers() {
     }
     Write(Newline(), "static const u8 data_segment_data_",
           GlobalName(ModuleFieldType::DataSegment, data_segment->name),
-          "[] = ", OpenBrace());
-    size_t i = 0;
-    for (uint8_t x : data_segment->data) {
-      Writef("0x%02x, ", x);
-      if ((++i % 12) == 0)
-        Write(Newline());
-    }
-    if (i > 0)
-      Write(Newline());
-    Write(CloseBrace(), ";", Newline());
+          "[] = ");
+    WriteBytes(data_segment, 0, data_segment->data.size());
+    Write(";", Newline());
   }
 
   Write(Newline(), "static void init_memories(", ModuleInstanceTypeName(),
