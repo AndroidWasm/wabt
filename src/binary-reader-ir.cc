@@ -1390,6 +1390,8 @@ Result BinaryReaderIR::OnDataSegmentData(Index index,
   assert(index == module_->data_segments.size() - 1);
   DataSegment* segment = module_->data_segments[index];
   segment->data.resize(size);
+  segment->data_offset =
+      GetLocation().offset - size - module_->data_section_base_;
   if (size > 0) {
     memcpy(segment->data.data(), data, size);
   }
@@ -1402,10 +1404,10 @@ Result BinaryReaderIR::OnDataSegmentData(Index index,
           index);
       return Result::Error;
     }
-    Offset data_encoding_end_offset =
-        GetLocation().offset - module_->data_section_base_ - 1;
-    module_->data_segment_reloc_to_address_[data_encoding_end_offset] =
-        offset + size - 1;
+    Offset last_byte_encoding_offset = segment->data_offset + size - 1;
+    Offset last_byte_address = offset + size - 1;
+    module_->data_segment_reloc_to_address_[last_byte_encoding_offset] =
+        last_byte_address;
   }
   return Result::Ok;
 }
