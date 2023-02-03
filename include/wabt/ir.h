@@ -1259,10 +1259,11 @@ struct Module {
   std::unordered_map<Index, Index> function_symbols_;
   std::unordered_map<Index, Index> data_symbols_;
 
-  // Mapping from the encoding offset of a data segment var (in the module
-  // encoding) to the corresponding base address (relative to the beginning of
-  // WASM memory).
-  std::map<Offset, Offset> data_segment_base_by_offset_;
+  // Mapping from the encoding offset of a data segment data (in the module
+  // encoding) to the corresponding address (relative to the beginning of
+  // WASM memory).  The entries are for the LAST byte of each data segment,
+  // so that they can be found using std::map::lower_bound.
+  std::map<Offset, Offset> data_segment_reloc_to_address_;
 
   // Mapping from a data symbol index to its name.  This mapping is only
   // constructed for data symbols that are marked undefined.
