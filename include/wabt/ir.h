@@ -112,13 +112,20 @@ struct Const {
 
   int lane_count() const {
     switch (lane_type()) {
-      case Type::I8:  return 16;
-      case Type::I16: return 8;
-      case Type::I32: return 4;
-      case Type::I64: return 2;
-      case Type::F32: return 4;
-      case Type::F64: return 2;
-      default: WABT_UNREACHABLE;
+      case Type::I8:
+        return 16;
+      case Type::I16:
+        return 8;
+      case Type::I32:
+        return 4;
+      case Type::I64:
+        return 2;
+      case Type::F32:
+        return 4;
+      case Type::F64:
+        return 2;
+      default:
+        WABT_UNREACHABLE;
     }
   }
 
@@ -945,6 +952,7 @@ struct DataSegment {
   std::string name;
   Var memory_var;
   ExprList offset;
+  Offset data_offset;  // Start of payload within data section.
   std::vector<uint8_t> data;
 };
 
@@ -1259,10 +1267,13 @@ struct Module {
   std::unordered_map<Index, Index> function_symbols_;
   std::unordered_map<Index, Index> data_symbols_;
 
-  // Mapping from the encoding offset of a data segment data (in the module
-  // encoding) to the corresponding address (relative to the beginning of
-  // WASM memory).  The entries are for the LAST byte of each data segment,
-  // so that they can be found using std::map::lower_bound.
+  // Mapping from the encoding offset of data segment data (in the module
+  // encoding) to the corresponding address relative to the beginning of
+  // WASM memory.
+  // The entries are for the offset of the last byte of the payload's encoding
+  // relative to data_section_base_.  This arrangement makes it possibly to find
+  // relocation offsets within the segment using std::map::lower_bound. The
+  // value is the address of the same last byte within WASM memory.
   std::map<Offset, Offset> data_segment_reloc_to_address_;
 
   // Mapping from a data symbol index to its name.  This mapping is only
