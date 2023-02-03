@@ -1665,9 +1665,16 @@ void CWriter::WriteDataInitializers() {
     }
     Write(Newline(), "static const u8 data_segment_data_",
           GlobalName(ModuleFieldType::DataSegment, data_segment->name),
-          "[] = ");
-    WriteBytes(data_segment, 0, data_segment->data.size());
-    Write(";", Newline());
+          "[] = ", OpenBrace());
+    size_t i = 0;
+    for (uint8_t x : data_segment->data) {
+      Writef("0x%02x, ", x);
+      if ((++i % 12) == 0)
+        Write(Newline());
+    }
+    if (i > 0)
+      Write(Newline());
+    Write(CloseBrace(), ";", Newline());
   }
 
   Write(Newline(), "static void init_memories(", ModuleInstanceTypeName(),
