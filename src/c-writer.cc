@@ -1502,8 +1502,12 @@ void CWriter::WriteNoSandboxDataSegments() {
     if (is_droppable(data_segment)) {
       UNIMPLEMENTED("droppable data segment in no-sandbox mode");
     }
-    Offset base = module_->data_segment_base_by_offset_.at(data_segment->memory_var.loc.offset);
-    Offset ceiling = base + data_segment->data.size();
+
+    Offset ceiling = module_->data_segment_reloc_to_address_
+                         .lower_bound(data_segment->data_offset)
+                         ->second +
+                     1;
+    Offset base = ceiling - data_segment->data.size();
 
     // Survey the data initialiser relocation maps.
     bool is64bit = false;  // found at least one 64-bit pointer initializer
@@ -1549,7 +1553,8 @@ void CWriter::WriteNoSandboxDataSegments() {
                 : module_->data_symbol_and_addend_by_mptr32_init_offset_;
 
     if (reloc_map.empty()) {
-      Write(Newline(), "static const u8 ", data_segment->name,
+      Write(Newline(), "static const u8 data_segment_data_",
+            GlobalName(ModuleFieldType::DataSegment, data_segment->name),
             "[] = ", OpenBrace());
       size_t i = 0;
       for (uint8_t x : data_segment->data) {
@@ -1574,18 +1579,21 @@ void CWriter::WriteNoSandboxDataSegments() {
               ? ceiling
               : next_reloc->first;
       if (next != cur) {
-        Write("u8 plain_data_at_", cur, "[", next - cur, "];", Newline());
+        Write("u8 plain_data_at_", cur - base, "[", next - cur, "];",
+              Newline());
       }
       if (next < ceiling) {
         bool is_function = next_reloc->second;
         Write(is64bit ? "u64" : "u32", " ", is_function ? "function" : "data",
-              "_pointer_at_", next, ";", Newline());
+              "_pointer_at_", next - base, ";", Newline());
         next += is64bit ? 8 : 4;
       }
       cur = next;
     }
 
-    Write(CloseBrace(), " ", data_segment->name, " = ", OpenBrace(), Newline());
+    Write(CloseBrace(), " data_segment_data_",
+          GlobalName(ModuleFieldType::DataSegment, data_segment->name), " = ",
+          OpenBrace(), Newline());
     Write("...", Newline());
     Write(CloseBrace(), ";", Newline());
   }
