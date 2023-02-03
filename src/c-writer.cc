@@ -3747,18 +3747,6 @@ void CWriter::Write(const LoadSplatExpr& expr) {
   PushType(result_type);
 }
 
-void CWriter::Write(const XXXLoadSplatExpr& expr) {
-  assert(module_->memories.size() == 1);
-  Memory* memory = module_->memories[0];
-
-  Type result_type = expr.opcode.GetResultType();
-  Write(StackVar(0, result_type), " = ", expr.opcode.GetName(), "(");
-  WriteMemoryAddress(0, memory, expr.loc.offset, expr.offset);
-  Write("));", Newline());
-  DropTypes(1);
-  PushType(result_type);
-}
-
 void CWriter::Write(const LoadZeroExpr& expr) {
   UNIMPLEMENTED("SIMD support");
 }
