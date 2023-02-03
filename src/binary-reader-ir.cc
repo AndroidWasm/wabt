@@ -1402,9 +1402,10 @@ Result BinaryReaderIR::OnDataSegmentData(Index index,
           index);
       return Result::Error;
     }
-    Offset data_encoding_base_offset =
-        GetLocation().offset - size - module_->data_section_base_;
-    module_->data_segment_base_by_offset_[data_encoding_base_offset] = offset;
+    Offset data_encoding_end_offset =
+        GetLocation().offset - module_->data_section_base_ - 1;
+    module_->data_segment_reloc_to_address_[data_encoding_end_offset] =
+        offset + size - 1;
   }
   return Result::Ok;
 }
@@ -1626,12 +1627,12 @@ Result BinaryReaderIR::ValidateDataSegmentSymbol(Index symbol_index) {
 }
 
 Offset BinaryReaderIR::MemoryOffsetFromDataRelocOffset(Offset reloc_offset) {
-  const auto& m = module_->data_segment_base_by_offset_;
+  const auto& m = module_->data_segment_reloc_to_address_;
   auto ptr = m.lower_bound(reloc_offset);
   if (ptr == m.end()) {
     return kInvalidOffset;
   }
-  return ptr->second + (reloc_offset - ptr->first);
+  return ptr->second - (ptr->first - reloc_offset);
 }
 
 Result BinaryReaderIR::ValidateMemoryOffset(Offset memory_offset,
