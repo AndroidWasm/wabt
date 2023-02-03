@@ -3722,6 +3722,32 @@ void CWriter::Write(const SimdShuffleOpExpr& expr) {
 }
 
 void CWriter::Write(const LoadSplatExpr& expr) {
+  Memory* memory = module_->memories[module_->GetMemoryIndex(expr.memidx)];
+
+  const char* func = nullptr;
+  // clang-format off
+  switch (expr.opcode) {
+    case Opcode::V128Load8Splat: func = "v128_load8_splat"; break;
+    case Opcode::V128Load16Splat: func = "v128_load16_splat"; break;
+    case Opcode::V128Load32Splat: func = "v128_load32_splat"; break;
+    case Opcode::V128Load64Splat: func = "v128_load64_splat"; break;
+    default:
+      WABT_UNREACHABLE;
+  }
+  // clang-format on
+  Type result_type = expr.opcode.GetResultType();
+  Write(StackVar(0, result_type), " = ", func, "(",
+        ExternalInstancePtr(ModuleFieldType::Memory, memory->name), ", (u64)(",
+        StackVar(0), ")");
+  if (expr.offset != 0)
+    Write(" + ", expr.offset);
+  Write(");", Newline());
+
+  DropTypes(1);
+  PushType(result_type);
+}
+
+void CWriter::Write(const XXXLoadSplatExpr& expr) {
   assert(module_->memories.size() == 1);
   Memory* memory = module_->memories[0];
 
