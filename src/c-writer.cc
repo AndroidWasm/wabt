@@ -3702,11 +3702,22 @@ void CWriter::Write(const SimdStoreLaneExpr& expr) {
 
 void CWriter::Write(const SimdShuffleOpExpr& expr) {
   Type result_type = expr.opcode.GetResultType();
-  Write(StackVar(1, result_type), " = ", expr.opcode.GetName(), "(",
-        StackVar(1), " ", StackVar(0), ", lane Imm: $0x%08x %08x %08x %08x",
-        expr.val.u32(0), expr.val.u32(1), expr.val.u32(2), expr.val.u32(3), ")",
-        Newline());
-  DropTypes(2);
+  switch (expr.opcode) {
+    case Opcode::I8X16Shuffle: {
+      Write(StackVar(1, result_type), " = simde_wasm_i8x16_shuffle(",
+            StackVar(1), ", ", StackVar(0), ", ", expr.val.u8(0), ", ",
+            expr.val.u8(1), ", ", expr.val.u8(2), ", ", expr.val.u8(3), ", ",
+            expr.val.u8(4), ", ", expr.val.u8(5), ", ", expr.val.u8(6), ", ",
+            expr.val.u8(7), ", ", expr.val.u8(8), ", ", expr.val.u8(9), ", ",
+            expr.val.u8(10), ", ", expr.val.u8(11), ", ", expr.val.u8(12), ", ",
+            expr.val.u8(13), ", ", expr.val.u8(14), ", ", expr.val.u8(15), ");",
+            Newline());
+      DropTypes(2);
+      break;
+    }
+    default:
+      WABT_UNREACHABLE;
+  }
   PushType(result_type);
 }
 
