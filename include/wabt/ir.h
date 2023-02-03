@@ -111,7 +111,6 @@ struct Const {
   }
 
   int lane_count() const {
-    // clang-format off
     switch (lane_type()) {
       case Type::I8:  return 16;
       case Type::I16: return 8;
@@ -121,7 +120,6 @@ struct Const {
       case Type::F64: return 2;
       default: WABT_UNREACHABLE;
     }
-    // clang-format on
   }
 
   uint32_t u32() const { return data_.u32(0); }
