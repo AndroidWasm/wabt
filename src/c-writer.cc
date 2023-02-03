@@ -4690,7 +4690,7 @@ void CWriter::Write(const SimdLoadLaneExpr& expr) {
   Type result_type = expr.opcode.GetResultType();
   Write(StackVar(1, result_type), " = ", func, expr.val, "(");
   WriteMemoryAddress(1, memory, expr.loc.offset, expr.offset);
-  Write(",", StackVar(0), ")", Newline());
+  Write(",", StackVar(0), ");", Newline());
 
   DropTypes(2);
   PushType(result_type);
@@ -4712,7 +4712,7 @@ void CWriter::Write(const SimdStoreLaneExpr& expr) {
 
   Write(func, expr.val, "(");
   WriteMemoryAddress(1, memory, expr.loc.offset, expr.offset);
-  Write(", ", StackVar(0), ")", Newline());
+  Write(", ", StackVar(0), ");", Newline());
 
   DropTypes(2);
 }
