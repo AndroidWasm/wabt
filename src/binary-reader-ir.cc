@@ -1375,13 +1375,14 @@ static Offset GetDataSegmentOffset(const DataSegment* data_segment) {
     return kInvalidOffset;
   }
   const Const& const_ = cast<ConstExpr>(&expr)->const_;
-  // clang-format off
   switch (const_.type()) {
-    case Type::I32: return const_.u32();
-    case Type::I64: return const_.u64();
-    default: return kInvalidOffset;
+    case Type::I32:
+      return const_.u32();
+    case Type::I64:
+      return const_.u64();
+    default:
+      return kInvalidOffset;
   }
-  // clang-format on
 }
 
 Result BinaryReaderIR::OnDataSegmentData(Index index,
