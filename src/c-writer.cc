@@ -4577,14 +4577,9 @@ void CWriter::Write(const SimdLoadLaneExpr& expr) {
   // clang-format on
   Memory* memory = module_->memories[module_->GetMemoryIndex(expr.memidx)];
   Type result_type = expr.opcode.GetResultType();
-  Write(StackVar(1, result_type), " = ", func, expr.val, "(",
-        ExternalInstancePtr(ModuleFieldType::Memory, memory->name), ", (u64)(",
-        StackVar(1), ")");
-
-  if (expr.offset != 0)
-    Write(" + ", expr.offset, "u");
-  Write(", ", StackVar(0));
-  Write(");", Newline());
+  Write(StackVar(1, result_type), " = ", func, expr.val, "(");
+  WriteMemoryAddress(1, memory, expr.loc.offset, expr.offset);
+  Write("," , StackVar(0), ")", Newline());
 
   DropTypes(2);
   PushType(result_type);
@@ -4604,14 +4599,9 @@ void CWriter::Write(const SimdStoreLaneExpr& expr) {
   // clang-format on
   Memory* memory = module_->memories[module_->GetMemoryIndex(expr.memidx)];
 
-  Write(func, expr.val, "(",
-        ExternalInstancePtr(ModuleFieldType::Memory, memory->name), ", (u64)(",
-        StackVar(1), ")");
-
-  if (expr.offset != 0)
-    Write(" + ", expr.offset, "u");
-  Write(", ", StackVar(0));
-  Write(");", Newline());
+  Write(func, expr.val, "(");
+  WriteMemoryAddress(1, memory, expr.loc.offset, expr.offset);
+  Write(", ", StackVar(0), ")", Newline());
 
   DropTypes(2);
 }
@@ -4652,11 +4642,8 @@ void CWriter::Write(const LoadSplatExpr& expr) {
   }
   // clang-format on
   Type result_type = expr.opcode.GetResultType();
-  Write(StackVar(0, result_type), " = ", func, "(",
-        ExternalInstancePtr(ModuleFieldType::Memory, memory->name), ", (u64)(",
-        StackVar(0), ")");
-  if (expr.offset != 0)
-    Write(" + ", expr.offset);
+  Write(StackVar(0, result_type), " = ", func, "(");
+  WriteMemoryAddress(0, memory, expr.loc.offset, expr.offset);
   Write(");", Newline());
 
   DropTypes(1);
@@ -4677,11 +4664,8 @@ void CWriter::Write(const LoadZeroExpr& expr) {
   // clang-format on
 
   Type result_type = expr.opcode.GetResultType();
-  Write(StackVar(0, result_type), " = ", func, "(",
-        ExternalInstancePtr(ModuleFieldType::Memory, memory->name), ", (u64)(",
-        StackVar(0), ")");
-  if (expr.offset != 0)
-    Write(" + ", expr.offset);
+  Write(StackVar(0, result_type), " = ", func, "(");
+  WriteMemoryAddress(0, memory, expr.loc.offset, expr.offset);
   Write(");", Newline());
 
   DropTypes(1);
