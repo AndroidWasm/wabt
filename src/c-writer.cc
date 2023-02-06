@@ -1588,12 +1588,8 @@ void CWriter::WriteNoSandboxDataSegments() {
       reloc_map[d32->first] = false;
     }
 
-    const auto& fmap = is64bit
-                           ? module_->function_symbol_by_fptr64_init_offset_
-                           : module_->function_symbol_by_fptr32_init_offset_;
-    const auto& dmap =
-        is64bit ? module_->data_symbol_and_addend_by_mptr64_init_offset_
-                : module_->data_symbol_and_addend_by_mptr32_init_offset_;
+    const auto& fmap = is64bit ? f64map : f32map;
+    const auto& dmap = is64bit ? d64map : d32map;
 
     Write(Newline(), "struct data_struct_",
           GlobalName(ModuleFieldType::DataSegment, data_segment->name), " ",
