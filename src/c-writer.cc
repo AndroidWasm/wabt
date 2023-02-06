@@ -1528,7 +1528,6 @@ void CWriter::WriteBytes(const DataSegment* segment,
 
 void CWriter::WriteNoSandboxDataSegments() {
   // Forward-declare all struct names and data segments.
-  // TODO: Make sure all function names are also forward-declared.
   Write(Newline());
   for (const DataSegment* data_segment : module_->data_segments) {
     Write("extern struct ", "data_struct_",
@@ -4185,6 +4184,7 @@ bool CWriter::TryWriteNoSandboxMemoryAddress(Offset instruction_offset,
   if (data_reloc == data_reloc_map.end()) {
     return false;
   }
+  Write(prefix);
   auto [data_symbol_index, addend] = data_reloc->second;
   WriteDataAddress(data_symbol_index, addend, is64bit);
   return true;
