@@ -1527,6 +1527,18 @@ void CWriter::WriteBytes(const DataSegment* segment,
 }
 
 void CWriter::WriteNoSandboxDataSegments() {
+  // Forward-declare all struct names and data segments.
+  // TODO: Make sure all function names are also forward-declared.
+  Write(Newline());
+  for (const DataSegment* data_segment : module_->data_segments) {
+    Write("extern struct ", "data_struct_",
+          GlobalName(ModuleFieldType::DataSegment, data_segment->name), " ",
+          "data_segment_data_",
+          GlobalName(ModuleFieldType::DataSegment, data_segment->name), ";",
+          Newline());
+  }
+
+  // Define data segments with initializers.
   for (const DataSegment* data_segment : module_->data_segments) {
     if (data_segment->data.empty()) {
       continue;
@@ -1584,16 +1596,9 @@ void CWriter::WriteNoSandboxDataSegments() {
         is64bit ? module_->data_symbol_and_addend_by_mptr64_init_offset_
                 : module_->data_symbol_and_addend_by_mptr32_init_offset_;
 
-    if (reloc_map.empty()) {
-      Write(Newline(), "static const u8 data_segment_data_",
-            GlobalName(ModuleFieldType::DataSegment, data_segment->name),
-            "[] = ");
-      WriteBytes(data_segment, 0, data_segment->data.size());
-      Write(";", Newline());
-      continue;
-    }
-
-    Write(Newline(), "static const struct ", OpenBrace());
+    Write(Newline(), "struct data_struct_",
+          GlobalName(ModuleFieldType::DataSegment, data_segment->name), " ",
+          OpenBrace());
     {
       Offset cur = base;
       while (cur < ceiling) {
