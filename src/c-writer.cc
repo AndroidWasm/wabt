@@ -4123,14 +4123,14 @@ void CWriter::Write(const ConvertExpr& expr) {
 void CWriter::WriteFunctionAddress(Index symbol_index, bool is64bit) {
   Index func_index = module_->function_symbols_.at(symbol_index);
   const std::string& func_name = module_->funcs[func_index]->name;
-  Write("reinterpret_cast<u", is64bit ? "64" : "32", ">(&",
+  Write("(u", is64bit ? "64" : "32", ")(&",
         GlobalName(ModuleFieldType::Func, func_name), ")");
 }
 
 void CWriter::WriteDataAddress(Index symbol_index,
                                uint32_t addend,
                                bool is64bit) {
-  Write("reinterpret_cast<u", is64bit ? "64" : "32", ">(&");
+  Write("(u", is64bit ? "64" : "32", ")(&");
   auto data_segment_index_ptr = module_->data_symbols_.find(symbol_index);
   if (data_segment_index_ptr == module_->data_symbols_.end()) {
     const std::string& external_name =
