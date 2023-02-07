@@ -28,7 +28,7 @@ static inline bool func_types_eq(const wasm_rt_func_type_t a,
        TRAP(CALL_INDIRECT),                              \
    ((t)table.data[x].func)(__VA_ARGS__))
 
-#endif // NO_SANDBOX
+#endif  // NO_SANDBOX
 
 #ifdef SUPPORT_MEMORY64
 #define RANGE_CHECK(mem, offset, len)              \
