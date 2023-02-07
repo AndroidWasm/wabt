@@ -1601,7 +1601,7 @@ void CWriter::WriteNoSandboxDataSegments() {
     const auto& fmap = is64bit ? f64map : f32map;
     const auto& dmap = is64bit ? d64map : d32map;
 
-    Write(Newline(), "struct data_struct_",
+    Write(Newline(), "struct __attribute__((__packed__)) data_struct_",
           GlobalName(ModuleFieldType::DataSegment, data_segment->name), " ",
           OpenBrace());
     {
