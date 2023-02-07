@@ -964,6 +964,9 @@ void CWriter::Write(const Const& const_) {
 }
 
 void CWriter::WriteInitDecl() {
+  if (options_.no_sandbox) {
+    return;
+  }
   Write("void " + module_prefix_ + "_instantiate(", ModuleInstanceTypeName(),
         "*");
   for (const auto& import_module_name : import_module_set_) {
@@ -973,6 +976,9 @@ void CWriter::WriteInitDecl() {
 }
 
 void CWriter::WriteFreeDecl() {
+  if (options_.no_sandbox) {
+    return;
+  }
   Write("void " + module_prefix_ + "_free(", ModuleInstanceTypeName(), "*);",
         Newline());
 }
@@ -1097,6 +1103,10 @@ void CWriter::WriteTagTypes() {
 }
 
 void CWriter::WriteFuncTypes() {
+  if (options_.no_sandbox) {
+    return;
+  }
+
   if (module_->types.empty()) {
     return;
   }
@@ -1740,6 +1750,10 @@ void CWriter::WriteElemInstances() {
 }
 
 void CWriter::WriteElemInitializers() {
+  if (options_.no_sandbox) {
+    return;
+  }
+
   if (module_->tables.empty()) {
     return;
   }
@@ -2010,6 +2024,9 @@ void CWriter::WriteExports(CWriterPhase kind) {
 }
 
 void CWriter::WriteInit() {
+  if (options_.no_sandbox) {
+    return;
+  }
   Write(Newline(), "void " + module_prefix_ + "_instantiate(",
         ModuleInstanceTypeName(), "* instance");
   for (const auto& import_module_name : import_module_set_) {
@@ -2062,6 +2079,9 @@ void CWriter::WriteInit() {
 }
 
 void CWriter::WriteGetFuncType() {
+  if (options_.no_sandbox) {
+    return;
+  }
   Write(Newline(), "wasm_rt_func_type_t ", module_prefix_,
         "_get_func_type(uint32_t param_count, uint32_t result_count, ...) ",
         OpenBrace());
@@ -2095,6 +2115,10 @@ void CWriter::WriteGetFuncType() {
 }
 
 void CWriter::WriteInitInstanceImport() {
+  if (options_.no_sandbox) {
+    return;
+  }
+
   if (import_module_set_.empty())
     return;
 
@@ -2170,6 +2194,9 @@ void CWriter::WriteImportProperties(CWriterPhase kind) {
 }
 
 void CWriter::WriteFree() {
+  if (options_.no_sandbox) {
+    return;
+  }
   Write(Newline(), "void " + module_prefix_ + "_free(",
         ModuleInstanceTypeName(), "* instance) ", OpenBrace());
 
