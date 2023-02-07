@@ -123,11 +123,15 @@ static inline bool func_types_eq(const wasm_rt_func_type_t a,
   return (a == b) || LIKELY(a && b && !memcmp(a, b, 32));
 }
 
+#ifndef NO_SANDBOX
+
 #define CALL_INDIRECT(table, t, ft, x, ...)              \
   (LIKELY((x) < table.size && table.data[x].func &&      \
           func_types_eq(ft, table.data[x].func_type)) || \
        TRAP(CALL_INDIRECT),                              \
    ((t)table.data[x].func)(__VA_ARGS__))
+
+#endif // NO_SANDBOX
 
 #ifdef SUPPORT_MEMORY64
 #define RANGE_CHECK(mem, offset, len)              \
@@ -157,9 +161,11 @@ static inline bool func_types_eq(const wasm_rt_func_type_t a,
 #endif
 
 #if WABT_BIG_ENDIAN
+
 #ifdef NO_SANDBOX
 #error "Big endian is not supported in --no-sandbox mode"
 #endif
+
 static inline void load_data(void* dest, const void* src, size_t n) {
   if (!n) {
     return;
@@ -215,6 +221,7 @@ static inline void load_data(void* dest, const void* src, size_t n) {
     wasm_asm("" ::"r"(result));                             \
     return (t3)(t2)result;                                  \
   }
+
 #define DEFINE_STORE(name, t1, t2)                     \
   static inline void name(u64 addr, t2 value) {        \
     t1 wrapped = (t1)value;                            \
@@ -238,7 +245,6 @@ static inline void load_data(void* dest, const void* src, size_t n) {
   }
 #endif  // NO_SANDBOX
 #endif  // WABT_BIG_ENDIAN
-
 
 DEFINE_LOAD(i32_load, u32, u32, u32)
 DEFINE_LOAD(i64_load, u64, u64, u64)
