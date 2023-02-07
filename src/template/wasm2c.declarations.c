@@ -20,11 +20,15 @@ static inline bool func_types_eq(const wasm_rt_func_type_t a,
   return (a == b) || LIKELY(a && b && !memcmp(a, b, 32));
 }
 
+#ifndef NO_SANDBOX
+
 #define CALL_INDIRECT(table, t, ft, x, ...)              \
   (LIKELY((x) < table.size && table.data[x].func &&      \
           func_types_eq(ft, table.data[x].func_type)) || \
        TRAP(CALL_INDIRECT),                              \
    ((t)table.data[x].func)(__VA_ARGS__))
+
+#endif // NO_SANDBOX
 
 #ifdef SUPPORT_MEMORY64
 #define RANGE_CHECK(mem, offset, len)              \
