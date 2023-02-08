@@ -2737,6 +2737,7 @@ void CWriter::Write(const ExprList& exprs) {
           Write(StackVar(num_params, decl.GetResultType(0)), " = ");
         }
 
+        bool needs_initial_comma = false;
         if (options_.no_sandbox) {
           Write("((");
           WriteCallIndirectFuncDeclaration(decl, "(*)");
@@ -2754,12 +2755,10 @@ void CWriter::Write(const ExprList& exprs) {
           Write(", ", FuncTypeExpr(func_type), ", ", StackVar(0));
           Write(", ", ExternalInstanceRef(ModuleFieldType::Table, table->name),
                 ".data[", StackVar(0), "].module_instance");
-          if (num_params > 0) {
-            Write(", ");
-          }
+          needs_initial_comma = true;
         }
         for (Index i = 0; i < num_params; ++i) {
-          if (i > 0) {
+          if (needs_initial_comma || i > 0) {
             Write(", ");
           }
           Write(StackVar(num_params - i));
