@@ -157,9 +157,11 @@ static inline bool func_types_eq(const wasm_rt_func_type_t a,
 #endif
 
 #if WABT_BIG_ENDIAN
+
 #ifdef NO_SANDBOX
 #error "Big endian is not supported in --no-sandbox mode"
 #endif
+
 static inline void load_data(void* dest, const void* src, size_t n) {
   if (!n) {
     return;
@@ -215,6 +217,7 @@ static inline void load_data(void* dest, const void* src, size_t n) {
     wasm_asm("" ::"r"(result));                             \
     return (t3)(t2)result;                                  \
   }
+
 #define DEFINE_STORE(name, t1, t2)                     \
   static inline void name(u64 addr, t2 value) {        \
     t1 wrapped = (t1)value;                            \
@@ -238,7 +241,6 @@ static inline void load_data(void* dest, const void* src, size_t n) {
   }
 #endif  // NO_SANDBOX
 #endif  // WABT_BIG_ENDIAN
-
 
 DEFINE_LOAD(i32_load, u32, u32, u32)
 DEFINE_LOAD(i64_load, u64, u64, u64)
