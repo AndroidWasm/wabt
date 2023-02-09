@@ -1762,24 +1762,25 @@ void CWriter::WriteDataInitializers() {
 
   if (options_.no_sandbox) {
     WriteNoSandboxDataSegments();
-  } else {
-    for (const DataSegment* data_segment : module_->data_segments) {
-      if (data_segment->data.empty()) {
-        continue;
-      }
-      Write(Newline(), "static const u8 data_segment_data_",
-            GlobalName(ModuleFieldType::DataSegment, data_segment->name),
-            "[] = ", OpenBrace());
-      size_t i = 0;
-      for (uint8_t x : data_segment->data) {
-        Writef("0x%02x, ", x);
-        if ((++i % 12) == 0)
-          Write(Newline());
-      }
-      if (i > 0)
-        Write(Newline());
-      Write(CloseBrace(), ";", Newline());
+    return;
+  }
+
+  for (const DataSegment* data_segment : module_->data_segments) {
+    if (data_segment->data.empty()) {
+      continue;
     }
+    Write(Newline(), "static const u8 data_segment_data_",
+          GlobalName(ModuleFieldType::DataSegment, data_segment->name),
+          "[] = ", OpenBrace());
+    size_t i = 0;
+    for (uint8_t x : data_segment->data) {
+      Writef("0x%02x, ", x);
+      if ((++i % 12) == 0)
+        Write(Newline());
+    }
+    if (i > 0)
+      Write(Newline());
+    Write(CloseBrace(), ";", Newline());
   }
 
   Write(Newline(), "static void init_memories(", ModuleInstanceTypeName(),
