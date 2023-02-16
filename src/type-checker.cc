@@ -293,6 +293,16 @@ Result TypeChecker::PopAndCheck1Type(Type expected, const char* desc) {
   return result;
 }
 
+Result TypeChecker::PopAndCheckI32OrI64(const char* desc) {
+  Result result = Result::Ok;
+  if (PeekAndCheckType(0, Type::I32) == Result::Error) {
+    result |= PeekAndCheckType(0, Type::I64);
+  }
+  PrintStackIfFailed(result, desc);
+  result |= DropTypes(1);
+  return result;
+}
+
 Result TypeChecker::PopAndCheck2Types(Type expected1,
                                       Type expected2,
                                       const char* desc) {
@@ -506,7 +516,7 @@ Result TypeChecker::OnCall(const TypeVector& param_types,
 
 Result TypeChecker::OnCallIndirect(const TypeVector& param_types,
                                    const TypeVector& result_types) {
-  Result result = PopAndCheck1Type(Type::I32, "call_indirect");
+  Result result = PopAndCheckI32OrI64("call_indirect");
   result |= PopAndCheckCall(param_types, result_types, "call_indirect");
   return result;
 }
