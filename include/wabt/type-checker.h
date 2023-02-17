@@ -166,7 +166,7 @@ class TypeChecker {
                          const TypeVector& result_types,
                          const char* desc);
   Result PopAndCheck1Type(Type expected, const char* desc);
-  Result PopAndCheckI32OrI64(const char* desc);
+  Result PopAndCheckCallIndirectTableIndex(const char* desc);
   Result PopAndCheck2Types(Type expected1, Type expected2, const char* desc);
   Result PopAndCheck3Types(Type expected1,
                            Type expected2,
