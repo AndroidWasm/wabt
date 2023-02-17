@@ -115,7 +115,7 @@ def IsModuleCommand(command):
 
 class CWriter(object):
 
-    def __init__(self, spec_json, prefix, out_file, out_dir, no_sandbox):
+    def __init__(self, spec_json, prefix, out_file, out_dir, disable_sandbox):
         self.source_filename = os.path.basename(spec_json['source_filename'])
         self.commands = spec_json['commands']
         self.out_file = out_file
@@ -124,7 +124,7 @@ class CWriter(object):
         self.module_idx = 0
         self.module_name_to_idx = {}
         self.module_prefix_map = {}
-        self.no_sandbox = no_sandbox
+        self.disable_sandbox = disable_sandbox
         self.unmangled_names = {}
         self.idx_to_module_name = {}
         self._MaybeWriteDummyModule()
@@ -255,7 +255,7 @@ class CWriter(object):
 
     def _WriteModuleCommand(self, command):
         self.module_idx += 1
-        if self.no_sandbox:
+        if self.disable_sandbox:
             return
         self._WriteModuleInitCall(command, False)
 
@@ -267,14 +267,14 @@ class CWriter(object):
                 idx += 1
 
     def _WriteModuleCleanUps(self):
-        if self.no_sandbox:
+        if self.disable_sandbox:
             return
         for idx in range(self.module_idx):
             self.out_file.write("%s_free(&%s_instance);\n" % (self.GetModulePrefix(idx), self.GetModulePrefix(idx)))
 
     def _WriteAssertUninstantiableCommand(self, command):
         self.module_idx += 1
-        if self.no_sandbox:
+        if self.disable_sandbox:
             return
         self._WriteModuleInitCall(command, True)
 
@@ -432,7 +432,7 @@ class CWriter(object):
         field = mangled_module_name + MangleName(action['field'])
         if type_ == 'invoke':
             args = self._ConstantList(action.get('args', []))
-            if self.no_sandbox:
+            if self.disable_sandbox:
                 if len(args) == 0:
                     args = f''
                 else:
@@ -542,7 +542,7 @@ def main(args):
     parser.add_argument('--disable-bulk-memory', action='store_true')
     parser.add_argument('--disable-reference-types', action='store_true')
     parser.add_argument('--debug-names', action='store_true')
-    parser.add_argument('--no-sandbox', action='store_true')
+    parser.add_argument('--disable-sandbox', action='store_true')
     options = parser.parse_args(args)
 
     with utils.TempDirectory(options.out_dir, 'run-spec-wasm2c-') as out_dir:
@@ -573,7 +573,7 @@ def main(args):
             '--enable-memory64': options.enable_memory64,
             '--enable-multi-memory': options.enable_multi_memory,
             '--experimental': options.experimental,
-            '--no-sandbox': options.no_sandbox})
+            '--disable-sandbox': options.disable_sandbox})
 
         options.cflags += shlex.split(os.environ.get('WASM2C_CFLAGS', ''))
         cc = utils.Executable(options.cc, *options.cflags, forward_stderr=True,
@@ -589,7 +589,7 @@ def main(args):
                 prefix = prefix_file.read() + '\n'
 
         output = io.StringIO()
-        cwriter = CWriter(spec_json, prefix, output, out_dir, options.no_sandbox)
+        cwriter = CWriter(spec_json, prefix, output, out_dir, options.disable_sandbox)
 
         o_filenames = []
         cflags = ['-I%s' % options.wasmrt_dir, '-I%s' % options.simde_dir]
