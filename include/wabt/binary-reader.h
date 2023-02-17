@@ -33,18 +33,6 @@ class Stream;
 
 struct ReadBinaryOptions {
   ReadBinaryOptions() = default;
-  ReadBinaryOptions(const Features& features,
-                    Stream* log_stream,
-                    bool read_debug_names,
-                    bool stop_on_first_error,
-                    bool fail_on_custom_section_error,
-                    bool no_sandbox)
-      : features(features),
-        log_stream(log_stream),
-        read_debug_names(read_debug_names),
-        stop_on_first_error(stop_on_first_error),
-        fail_on_custom_section_error(fail_on_custom_section_error),
-        no_sandbox(no_sandbox) {}
 
   ReadBinaryOptions(const Features& features,
                     Stream* log_stream,
@@ -55,8 +43,7 @@ struct ReadBinaryOptions {
         log_stream(log_stream),
         read_debug_names(read_debug_names),
         stop_on_first_error(stop_on_first_error),
-        fail_on_custom_section_error(fail_on_custom_section_error),
-        no_sandbox(false) {}
+        fail_on_custom_section_error(fail_on_custom_section_error) {}
 
   Features features;
   Stream* log_stream = nullptr;
@@ -64,7 +51,6 @@ struct ReadBinaryOptions {
   bool stop_on_first_error = true;
   bool fail_on_custom_section_error = true;
   bool skip_function_bodies = false;
-  bool no_sandbox = false;
 };
 
 // TODO: Move somewhere else?

@@ -58,17 +58,24 @@ examples:
 
 static const std::string supported_features[] = {
     "multi-memory", "multi-value", "sign-extend", "saturating-float-to-int",
-    "exceptions",   "memory64"};
+    "exceptions",   "memory64",    "no-sandbox"};
+
+static const std::string experimental_features[] = {"no-sandbox"};
 
 static bool IsFeatureSupported(const std::string& feature) {
   return std::find(std::begin(supported_features), std::end(supported_features),
                    feature) != std::end(supported_features);
 };
 
+static bool IsFeatureExperimental(const std::string& feature) {
+  return std::find(std::begin(experimental_features),
+                   std::end(experimental_features),
+                   feature) != std::end(experimental_features);
+}
+
 static void ParseOptions(int argc, char** argv) {
   OptionParser parser("wasm2c", s_description);
   bool experimental_flag_is_set = false;
-  bool experimental_feature_enabled = false;
 
   parser.AddOption('v', "verbose", "Use multiple times for more info", []() {
     s_verbose++;
@@ -93,13 +100,6 @@ static void ParseOptions(int argc, char** argv) {
                    []() { s_read_debug_names = false; });
   parser.AddOption("experimental", "Enable flags marked as (Experimental)\n",
                    [&]() { experimental_flag_is_set = true; });
-  parser.AddOption("no-sandbox",
-                   "(Experimental) Disable all sandboxing and unify host and\n"
-                   "WebAssembly address space for maximum compatibility.\n",
-                   [&]() {
-                     s_write_c_options.no_sandbox = true;
-                     experimental_feature_enabled = true;
-                   });
   parser.AddArgument("filename", OptionParser::ArgumentCount::One,
                      [](const char* argument) {
                        s_infile = argument;
@@ -107,25 +107,28 @@ static void ParseOptions(int argc, char** argv) {
                      });
   parser.Parse(argc, argv);
 
-  // Check that experimental flag is set for experimental features.
-  if (experimental_feature_enabled && !experimental_flag_is_set) {
-    fprintf(stderr,
-            "Some enabled features are experimental please set --experimental "
-            "flag to enable them.\n");
-    exit(1);
-  }
+  s_write_c_options.no_sandbox = !s_features.sandbox_enabled();
 
   bool any_non_supported_feature = false;
-#define WABT_FEATURE(variable, flag, default_, help)   \
-  any_non_supported_feature |=                         \
-      (s_features.variable##_enabled() != default_) && \
-      !IsFeatureSupported(flag);
+  bool any_experimental_feature = false;
+#define WABT_FEATURE(variable, flag, default_, help)                           \
+  any_non_supported_feature |=                                                 \
+      (s_features.variable##_enabled() != default_) &&                         \
+      !IsFeatureSupported(flag);                                               \
+  any_experimental_feature |= (s_features.variable##_enabled() != default_) && \
+                              IsFeatureExperimental(flag);
 #include "wabt/feature.def"
 #undef WABT_FEATURE
 
   if (any_non_supported_feature) {
     fprintf(stderr,
             "wasm2c currently only supports a limited set of features.\n");
+    exit(1);
+  }
+  if (!experimental_flag_is_set && any_experimental_feature) {
+    fprintf(stderr,
+            "Some enabled features are experimental please set --experimental "
+            "flag to enable them.\n");
     exit(1);
   }
 }
@@ -153,9 +156,9 @@ int ProgramMain(int argc, char** argv) {
     Module module;
     const bool kStopOnFirstError = true;
     const bool kFailOnCustomSectionError = true;
-    ReadBinaryOptions options(
-        s_features, s_log_stream.get(), s_read_debug_names, kStopOnFirstError,
-        kFailOnCustomSectionError, s_write_c_options.no_sandbox);
+    ReadBinaryOptions options(s_features, s_log_stream.get(),
+                              s_read_debug_names, kStopOnFirstError,
+                              kFailOnCustomSectionError);
     result = ReadBinaryIr(s_infile.c_str(), file_data.data(), file_data.size(),
                           options, &errors, &module);
     if (Succeeded(result)) {

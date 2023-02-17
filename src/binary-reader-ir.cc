@@ -1396,7 +1396,7 @@ Result BinaryReaderIR::OnDataSegmentData(Index index,
   if (size > 0) {
     memcpy(segment->data.data(), data, size);
   }
-  if (options_.no_sandbox) {
+  if (!options_.features.sandbox_enabled()) {
     Offset offset = GetDataSegmentOffset(segment);
     if (offset == kInvalidOffset) {
       PrintError(
@@ -1536,7 +1536,7 @@ Result BinaryReaderIR::SetMemoryName(Index index, std::string_view name) {
   if (name.empty()) {
     return Result::Ok;
   }
-  if (options_.no_sandbox && index > 0) {
+  if (!options_.features.sandbox_enabled() && index > 0) {
     PrintError("multiple memories used in no-sandbox mode");
     return Result::Error;
   }
@@ -1652,7 +1652,7 @@ Result BinaryReaderIR::OnReloc(RelocType type,
                                Offset offset,
                                Index index,
                                uint32_t addend) {
-  if (!options_.no_sandbox) {
+  if (options_.features.sandbox_enabled()) {
     return Result::Ok;
   }
   switch (type) {
