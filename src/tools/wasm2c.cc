@@ -58,9 +58,9 @@ examples:
 
 static const std::string supported_features[] = {
     "multi-memory", "multi-value", "sign-extend", "saturating-float-to-int",
-    "exceptions",   "memory64",    "no-sandbox"};
+    "exceptions",   "memory64",    "sandbox"};
 
-static const std::string experimental_features[] = {"no-sandbox"};
+static const std::string experimental_features[] = {"sandbox"};
 
 static bool IsFeatureSupported(const std::string& feature) {
   return std::find(std::begin(supported_features), std::end(supported_features),
