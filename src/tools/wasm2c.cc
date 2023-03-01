@@ -40,7 +40,7 @@ static int s_verbose;
 static std::string s_infile;
 static std::string s_outfile;
 static Features s_features;
-static WriteCOptions s_write_c_options;
+static WriteCOptions s_write_c_options(s_features);
 static bool s_read_debug_names = true;
 static std::unique_ptr<FileStream> s_log_stream;
 
@@ -106,8 +106,6 @@ static void ParseOptions(int argc, char** argv) {
                        ConvertBackslashToSlash(&s_infile);
                      });
   parser.Parse(argc, argv);
-
-  s_write_c_options.no_sandbox = !s_features.sandbox_enabled();
 
   bool any_non_supported_feature = false;
   bool any_experimental_feature = false;

@@ -640,7 +640,7 @@ void CWriter::DefineImportName(const Import* import,
                                std::string_view module,
                                std::string_view field_name) {
   std::string mangled;
-  if (options_.no_sandbox && module == "env") {
+  if (!options_.features.sandbox_enabled() && module == "env") {
     mangled = field_name;
   } else {
     mangled = MangleName(module) + MangleName(field_name);
@@ -1017,7 +1017,7 @@ void CWriter::Write(const Const& const_) {
 }
 
 void CWriter::WriteInitDecl() {
-  if (options_.no_sandbox) {
+  if (!options_.features.sandbox_enabled()) {
     return;
   }
   Write("void " + module_prefix_ + "_instantiate(", ModuleInstanceTypeName(),
@@ -1029,7 +1029,7 @@ void CWriter::WriteInitDecl() {
 }
 
 void CWriter::WriteFreeDecl() {
-  if (options_.no_sandbox) {
+  if (!options_.features.sandbox_enabled()) {
     return;
   }
   Write("void " + module_prefix_ + "_free(", ModuleInstanceTypeName(), "*);",
@@ -1104,7 +1104,7 @@ std::string CWriter::GenerateHeaderGuard() const {
 void CWriter::WriteSourceTop() {
   Write(s_source_includes);
   Write(Newline(), "#include \"", header_name_, "\"", Newline());
-  if (options_.no_sandbox) {
+  if (!options_.features.sandbox_enabled()) {
     Write("#define NO_SANDBOX", Newline());
   }
   Write(s_source_declarations);
@@ -1156,7 +1156,7 @@ void CWriter::WriteTagTypes() {
 }
 
 void CWriter::WriteFuncTypes() {
-  if (options_.no_sandbox) {
+  if (!options_.features.sandbox_enabled()) {
     return;
   }
 
@@ -1242,7 +1242,8 @@ void CWriter::WriteTags() {
 }
 
 bool CWriter::SkipImport(const Import* import) const {
-  return options_.no_sandbox && import->module_name == kEnvModuleName &&
+  return !options_.features.sandbox_enabled() &&
+         import->module_name == kEnvModuleName &&
          import->field_name == kStackPointerNameWithoutDollar;
 }
 
@@ -1350,7 +1351,8 @@ void CWriter::BeginInstance() {
     Write("/* import: '", import->module_name, "' '", import->field_name,
           "' */", Newline());
 
-    if (options_.no_sandbox && import->kind() == ExternalKind::Global &&
+    if (!options_.features.sandbox_enabled() &&
+        import->kind() == ExternalKind::Global &&
         import->field_name == kStackPointerName) {
       Write("/* ", kStackPointerName,
             " implementation is replaced with thread-local array */",
@@ -1463,7 +1465,7 @@ void CWriter::WriteFuncDeclarations() {
 void CWriter::WriteFuncDeclaration(const FuncDeclaration& decl,
                                    const std::string& name) {
   Write(ResultType(decl.sig.result_types), " ", name, "(");
-  if (!options_.no_sandbox) {
+  if (options_.features.sandbox_enabled()) {
     Write(ModuleInstanceTypeName(), "*");
   }
   WriteParamTypes(decl);
@@ -1474,7 +1476,7 @@ void CWriter::WriteImportFuncDeclaration(const FuncDeclaration& decl,
                                          const std::string& module_name,
                                          const std::string& name) {
   Write(ResultType(decl.sig.result_types), " ", name, "(");
-  if (!options_.no_sandbox) {
+  if (options_.features.sandbox_enabled()) {
     Write("struct ", MangleModuleInstanceTypeName(module_name), "*");
   }
   WriteParamTypes(decl);
@@ -1484,7 +1486,7 @@ void CWriter::WriteImportFuncDeclaration(const FuncDeclaration& decl,
 void CWriter::WriteCallIndirectFuncDeclaration(const FuncDeclaration& decl,
                                                const std::string& name) {
   Write(ResultType(decl.sig.result_types), " ", name, "(");
-  if (!options_.no_sandbox) {
+  if (options_.features.sandbox_enabled()) {
     Write("void*");
   }
   WriteParamTypes(decl);
@@ -1512,7 +1514,8 @@ void CWriter::WriteModuleInstance() {
 void CWriter::WriteGlobals() {
   Index global_index = 0;
   for (const Global* global : module_->globals) {
-    if (options_.no_sandbox && global->name == kStackPointerName) {
+    if (!options_.features.sandbox_enabled() &&
+        global->name == kStackPointerName) {
       // Remember the global to write it later (it needs to be part of .c file)
       stack_pointer_global_ = global;
     } else {
@@ -1528,7 +1531,7 @@ void CWriter::WriteGlobals() {
 }
 
 void CWriter::WriteStackPointerGlobal(const Global& global) {
-  assert(options_.no_sandbox);
+  assert(!options_.features.sandbox_enabled());
   // Ideally we would want to have a guard page here in order to
   // catch stack-overflows. For now just add 4k as a buffer page.
   // We also add a range check against kStackSize on GlobalSet,
@@ -1616,7 +1619,8 @@ void CWriter::WriteGlobalInitializers() {
   Index global_index = 0;
   for (const Global* global : module_->globals) {
     // Ignore __stack_pointer in no-sandbox mode
-    if (options_.no_sandbox && global->name == kStackPointerName)
+    if (!options_.features.sandbox_enabled() &&
+        global->name == kStackPointerName)
       continue;
 
     bool is_import = global_index < module_->num_global_imports;
@@ -1797,7 +1801,7 @@ void CWriter::WriteDataInitializers() {
     return;
   }
 
-  if (options_.no_sandbox) {
+  if (!options_.features.sandbox_enabled()) {
     WriteNoSandboxDataSegments();
     return;
   }
@@ -1883,7 +1887,7 @@ void CWriter::WriteElemInstances() {
 }
 
 void CWriter::WriteElemInitializers() {
-  if (options_.no_sandbox) {
+  if (!options_.features.sandbox_enabled()) {
     return;
   }
 
@@ -2104,7 +2108,7 @@ void CWriter::WriteExports(CWriterPhase kind) {
         Write(OpenBrace());
         Write("return ", ExternalRef(ModuleFieldType::Func, internal_name),
               "(");
-        if (!options_.no_sandbox) {
+        if (options_.features.sandbox_enabled()) {
           bool is_import = import_module_sym_map_.count(internal_name) != 0;
           if (is_import) {
             Write("instance->", MangleModuleInstanceName(
@@ -2158,7 +2162,7 @@ void CWriter::WriteExports(CWriterPhase kind) {
 }
 
 void CWriter::WriteInit() {
-  if (options_.no_sandbox) {
+  if (!options_.features.sandbox_enabled()) {
     return;
   }
   Write(Newline(), "void " + module_prefix_ + "_instantiate(",
@@ -2213,7 +2217,7 @@ void CWriter::WriteInit() {
 }
 
 void CWriter::WriteGetFuncType() {
-  if (options_.no_sandbox) {
+  if (!options_.features.sandbox_enabled()) {
     return;
   }
   Write(Newline(), "wasm_rt_func_type_t ", module_prefix_,
@@ -2249,7 +2253,7 @@ void CWriter::WriteGetFuncType() {
 }
 
 void CWriter::WriteInitInstanceImport() {
-  if (options_.no_sandbox) {
+  if (!options_.features.sandbox_enabled()) {
     return;
   }
 
@@ -2328,7 +2332,7 @@ void CWriter::WriteImportProperties(CWriterPhase kind) {
 }
 
 void CWriter::WriteFree() {
-  if (options_.no_sandbox) {
+  if (!options_.features.sandbox_enabled()) {
     return;
   }
   Write(Newline(), "void " + module_prefix_ + "_free(",
@@ -2448,7 +2452,7 @@ void CWriter::WriteParamsAndLocals() {
 
 void CWriter::WriteParams(const std::vector<std::string>& index_to_name) {
   bool need_comma = false;
-  if (!options_.no_sandbox) {
+  if (options_.features.sandbox_enabled()) {
     Write(ModuleInstanceTypeName(), "* instance");
     need_comma = true;
   }
@@ -2472,7 +2476,7 @@ void CWriter::WriteParams(const std::vector<std::string>& index_to_name) {
 }
 
 void CWriter::WriteParamSymbols(const std::vector<std::string>& index_to_name) {
-  bool needs_comma = !options_.no_sandbox;
+  bool needs_comma = options_.features.sandbox_enabled();
   if (func_->GetNumParams() != 0) {
     Indent(4);
     for (Index i = 0; i < func_->GetNumParams(); ++i) {
@@ -2492,7 +2496,7 @@ void CWriter::WriteParamSymbols(const std::vector<std::string>& index_to_name) {
 }
 
 void CWriter::WriteParamTypes(const FuncDeclaration& decl) {
-  bool needs_comma = !options_.no_sandbox;
+  bool needs_comma = options_.features.sandbox_enabled();
   if (decl.GetNumParams() != 0) {
     for (Index i = 0; i < decl.GetNumParams(); ++i) {
       if (needs_comma) {
@@ -2816,7 +2820,7 @@ void CWriter::Write(const ExprList& exprs) {
 
         assert(var.is_name());
         Write(ExternalRef(ModuleFieldType::Func, var.name()), "(");
-        if (!options_.no_sandbox) {
+        if (options_.features.sandbox_enabled()) {
           bool is_import = import_module_sym_map_.count(func.name) != 0;
           if (is_import) {
             Write("instance->",
@@ -2826,7 +2830,7 @@ void CWriter::Write(const ExprList& exprs) {
           }
         }
 
-        bool needs_comma = !options_.no_sandbox;
+        bool needs_comma = options_.features.sandbox_enabled();
         for (Index i = 0; i < num_params; ++i) {
           if (needs_comma) {
             Write(", ");
@@ -2866,7 +2870,7 @@ void CWriter::Write(const ExprList& exprs) {
         }
 
         bool needs_comma = false;
-        if (options_.no_sandbox) {
+        if (!options_.features.sandbox_enabled()) {
           Write("((");
           WriteCallIndirectFuncDeclaration(decl, "(*)");
           Write(")", StackVar(0), ")(");
@@ -2931,7 +2935,8 @@ void CWriter::Write(const ExprList& exprs) {
 
       case ExprType::GlobalGet: {
         const Var& var = cast<GlobalGetExpr>(&expr)->var;
-        if (options_.no_sandbox && var.name() == kStackPointerName) {
+        if (!options_.features.sandbox_enabled() &&
+            var.name() == kStackPointerName) {
           PushType(module_->GetGlobal(var)->type);
           Write(StackVar(0), " = ((uintptr_t)&", kStackArrayVariableName,
                 "[0]) + ", kStackOffsetGlobalVariableName, ";", Newline());
@@ -2944,7 +2949,8 @@ void CWriter::Write(const ExprList& exprs) {
 
       case ExprType::GlobalSet: {
         const Var& var = cast<GlobalSetExpr>(&expr)->var;
-        if (options_.no_sandbox && var.name() == kStackPointerName) {
+        if (!options_.features.sandbox_enabled() &&
+            var.name() == kStackPointerName) {
           Write("if (UNLIKELY(", StackVar(0), " < ", kStackBufferSize,
                 " + (uintptr_t)", kStackArrayVariableName, ")) TRAP(OOB);",
                 Newline());
@@ -4405,7 +4411,7 @@ void CWriter::WriteMemoryAddress(Index stack_index,
                                  const Memory* memory,
                                  size_t loc_offset,
                                  Address offset) {
-  if (options_.no_sandbox) {
+  if (!options_.features.sandbox_enabled()) {
     Write("(u64)(", StackVar(stack_index), ")");
     if (TryWriteNoSandboxMemoryAddress(loc_offset, memory->page_limits.is_64,
                                        " + ")) {
@@ -4425,7 +4431,7 @@ void CWriter::Write(const ConstExpr& expr) {
   bool is64bit = const_.type() == Type::I64;
   PushType(const_.type());
   Write(StackVar(0), " = ");
-  if (!options_.no_sandbox ||
+  if (options_.features.sandbox_enabled() ||
       (!TryWriteNoSandboxFunctionAddress(expr.loc.offset, is64bit) &&
        !TryWriteNoSandboxMemoryAddress(expr.loc.offset, is64bit))) {
     Write(const_);
@@ -5063,10 +5069,10 @@ void CWriter::WriteCHeader() {
   WriteFreeDecl();
   WriteGetFuncTypeDecl();
   WriteMultivalueTypes();
-  if (options_.no_sandbox) {
-    WriteImportsNoSandbox();
-  } else {
+  if (options_.features.sandbox_enabled()) {
     WriteImports();
+  } else {
+    WriteImportsNoSandbox();
   }
   WriteImportProperties(CWriterPhase::Declarations);
   WriteExports(CWriterPhase::Declarations);
