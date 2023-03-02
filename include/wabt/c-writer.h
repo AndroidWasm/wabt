@@ -26,7 +26,7 @@ struct Module;
 class Stream;
 
 struct WriteCOptions {
-  explicit WriteCOptions(Features features) : features(features) {}
+  explicit WriteCOptions(const Features& features) : features(features) {}
   std::string_view module_name;
   const Features features;
 };

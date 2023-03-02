@@ -52,8 +52,8 @@ std::unique_ptr<WastLexer> WastLexer::CreateBufferLexer(
     const void* data,
     size_t size,
     Errors* errors) {
-  return MakeUnique<WastLexer>(MakeUnique<LexerSource>(data, size), filename,
-                               errors);
+  return std::make_unique<WastLexer>(std::make_unique<LexerSource>(data, size),
+                                     filename, errors);
 }
 
 Token WastLexer::GetToken() {
@@ -70,7 +70,7 @@ Token WastLexer::GetToken() {
           }
           return BareToken(TokenType::Eof);
         } else if (MatchString("(@")) {
-          ReadReservedChars();
+          GetIdToken();
           // offset=2 to skip the "(@" prefix
           return TextToken(TokenType::LparAnn, 2);
         } else {
