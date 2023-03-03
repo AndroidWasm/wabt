@@ -26,9 +26,11 @@ struct Module;
 class Stream;
 
 struct WriteCOptions {
-  explicit WriteCOptions(const Features& features) : features(features) {}
+  // Caller keeps ownership of Feauters object and must keep it alive for the
+  // lifetime of the options object.
+  explicit WriteCOptions(const Features* features) : features(*features) {}
   std::string_view module_name;
-  const Features features;
+  const Features& features;
 };
 
 Result WriteC(Stream* c_stream,

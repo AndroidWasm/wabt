@@ -40,7 +40,7 @@ static int s_verbose;
 static std::string s_infile;
 static std::string s_outfile;
 static Features s_features;
-static WriteCOptions s_write_c_options(s_features);
+static WriteCOptions s_write_c_options(&s_features);
 static bool s_read_debug_names = true;
 static std::unique_ptr<FileStream> s_log_stream;
 
