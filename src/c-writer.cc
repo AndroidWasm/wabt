@@ -1000,7 +1000,7 @@ void CWriter::Write(const GlobalName& name) {
 
 void CWriter::Write(const ExternalPtr& name) {
   bool is_import = import_syms_.count(name.name) != 0;
-  if (!is_import) {
+  if (!is_import || !options_.features.sandbox_enabled()) {
     Write("&");
   }
   Write(GlobalName(name));
@@ -1016,7 +1016,7 @@ void CWriter::Write(const ExternalInstancePtr& name) {
 
 void CWriter::Write(const ExternalRef& name) {
   bool is_import = import_syms_.count(name.name) != 0;
-  if (is_import) {
+  if (is_import && options_.features.sandbox_enabled()) {
     Write("(*", GlobalName(name), ")");
   } else {
     Write(GlobalName(name));
@@ -1597,7 +1597,7 @@ void CWriter::WriteImportsNoSandbox() {
       Write("/* import: '", import->module_name, "' '", import->field_name,
             "' */", Newline());
       const Func& func = cast<FuncImport>(import)->func;
-      if (import->module_name == "env") {
+      if (import->module_name == kEnvModuleName) {
         WriteImportFuncDeclaration(func.decl, import->module_name,
                                    import->field_name);
       } else {
@@ -4545,8 +4545,8 @@ void CWriter::Write(const ConvertExpr& expr) {
 void CWriter::WriteFunctionAddress(Index symbol_index, bool is64bit) {
   Index func_index = module_->function_symbols_.at(symbol_index);
   const std::string& func_name = module_->funcs[func_index]->name;
-  Write("(u", is64bit ? "64" : "32", ")(&",
-        GlobalName(ModuleFieldType::Func, func_name), ")");
+  Write("(u", is64bit ? "64" : "32", ")(",
+        ExternalPtr(ModuleFieldType::Func, func_name), ")");
 }
 
 void CWriter::WriteDataAddress(Index symbol_index,
