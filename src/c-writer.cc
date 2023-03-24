@@ -1217,9 +1217,6 @@ void CWriter::Write(const Const& const_) {
 }
 
 void CWriter::WriteInitDecl() {
-  if (!options_.features.sandbox_enabled()) {
-    return;
-  }
   Write("void ", kAdminSymbolPrefix, module_prefix_, "_instantiate(",
         ModuleInstanceTypeName(), "*");
   for (const auto& import_module_name : import_module_set_) {
@@ -1229,9 +1226,6 @@ void CWriter::WriteInitDecl() {
 }
 
 void CWriter::WriteFreeDecl() {
-  if (!options_.features.sandbox_enabled()) {
-    return;
-  }
   Write("void ", kAdminSymbolPrefix, module_prefix_, "_free(",
         ModuleInstanceTypeName(), "*);", Newline());
 }
@@ -1808,12 +1802,15 @@ void CWriter::WriteTableType(const wabt::Type& type) {
 }
 
 void CWriter::WriteGlobalInitializers() {
+  if (!options_.features.sandbox_enabled()) {
+    if (stack_pointer_global_ != nullptr) {
+      WriteStackPointerGlobal(*stack_pointer_global_);
+    }
+    return;
+  }
+
   if (module_->globals.empty())
     return;
-
-  if (stack_pointer_global_ != nullptr) {
-    WriteStackPointerGlobal(*stack_pointer_global_);
-  }
 
   Write(Newline(), "static void init_globals(", ModuleInstanceTypeName(),
         "* instance) ", OpenBrace());
@@ -2234,10 +2231,24 @@ void CWriter::WriteExports(CWriterPhase kind) {
     return;
 
   for (const Export* export_ : module_->exports) {
+    if (!options_.features.sandbox_enabled() &&
+        export_->kind == ExternalKind::Memory) {
+      continue;
+    }
+
     Write(Newline(), "/* export: '", SanitizeForComment(export_->name), "' */",
           Newline());
 
     const std::string mangled_name = ExportName(export_->name);
+    if (!options_.features.sandbox_enabled() &&
+        kind == CWriterPhase::Declarations) {
+      // In no-sandbox mode the mangled name is consistently replaced with the
+      // "real" export name, i.e., the name that linked code expects.  Since
+      // some usages (especially in tests) still refer to the mangled name, we
+      // implement this replacement via #define, making the mangled name
+      // internally an alias of the real name.
+      Write("#define ", mangled_name, " ", export_->name, Newline());
+    }
     std::string internal_name;
     std::vector<std::string> index_to_name;
 
@@ -5273,10 +5284,16 @@ void CWriter::WriteCHeader() {
   Write(Newline());
   Write(s_header_top);
   Write(Newline());
+  // TODO: The module instance should not be written in no-sandbox mode.
+  // However, the logic for writing is currently intermingled with code that
+  // initializes global_sym_map_, so it must be invoked. Best would be to
+  // disentangle data structure initialization from rendering of code.
   WriteModuleInstance();
-  WriteInitDecl();
-  WriteFreeDecl();
-  WriteGetFuncTypeDecl();
+  if (options_.features.sandbox_enabled()) {
+    WriteInitDecl();
+    WriteFreeDecl();
+    WriteGetFuncTypeDecl();
+  }
   WriteMultivalueTypes();
   if (options_.features.sandbox_enabled()) {
     WriteImports();
