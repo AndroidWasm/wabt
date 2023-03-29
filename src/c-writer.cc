@@ -5288,11 +5288,18 @@ void CWriter::WriteCHeader() {
   // However, the logic for writing is currently intermingled with code that
   // initializes global_sym_map_, so it must be invoked. Best would be to
   // disentangle data structure initialization from rendering of code.
+  if (!options_.features.sandbox_enabled()) {
+    // As a workaround, force the generated module instance to be
+    // commented-out in no-sandbox mode.
+    Write("#if 0", Newline());
+  }
   WriteModuleInstance();
   if (options_.features.sandbox_enabled()) {
     WriteInitDecl();
     WriteFreeDecl();
     WriteGetFuncTypeDecl();
+  } else {
+    Write("#endif", Newline());  // end workaround
   }
   WriteMultivalueTypes();
   if (options_.features.sandbox_enabled()) {
