@@ -383,8 +383,6 @@ class BinaryReaderIR : public BinaryReaderNop {
   Result SetTagName(Index index, std::string_view name);
   Result ValidateFunctionSymbol(Index symbol_index);
   Result ValidateDataSegmentSymbol(Index symbol_index);
-  Offset MemoryOffsetFromDataRelocOffset(Offset reloc_offset);
-  Result ValidateMemoryOffset(Offset memory_offset, Index symbol_index);
 
   std::string GetUniqueName(BindingHash* bindings,
                             const std::string& original_name);
@@ -1384,25 +1382,6 @@ Result BinaryReaderIR::EndDataSegmentInitExpr(Index index) {
   return EndInitExpr();
 }
 
-static Offset GetDataSegmentOffset(const DataSegment* data_segment) {
-  if (data_segment->offset.size() != 1) {
-    return kInvalidOffset;
-  }
-  const auto& expr = *data_segment->offset.begin();
-  if (expr.type() != ExprType::Const) {
-    return kInvalidOffset;
-  }
-  const Const& const_ = cast<ConstExpr>(&expr)->const_;
-  switch (const_.type()) {
-    case Type::I32:
-      return const_.u32();
-    case Type::I64:
-      return const_.u64();
-    default:
-      return kInvalidOffset;
-  }
-}
-
 Result BinaryReaderIR::OnDataSegmentData(Index index,
                                          const void* data,
                                          Address size) {
@@ -1413,20 +1392,6 @@ Result BinaryReaderIR::OnDataSegmentData(Index index,
       GetLocation().offset - size - module_->data_section_base_;
   if (size > 0) {
     memcpy(segment->data.data(), data, size);
-  }
-  if (!options_.features.sandbox_enabled()) {
-    Offset offset = GetDataSegmentOffset(segment);
-    if (offset == kInvalidOffset) {
-      PrintError(
-          "non-constant data offset in no-sandbox mode, data segment "
-          "%" PRIindex,
-          index);
-      return Result::Error;
-    }
-    Offset last_byte_encoding_offset = segment->data_offset + size - 1;
-    Offset last_byte_address = offset + size - 1;
-    module_->data_segment_reloc_to_address_[last_byte_encoding_offset] =
-        last_byte_address;
   }
   return Result::Ok;
 }
@@ -1647,25 +1612,6 @@ Result BinaryReaderIR::ValidateDataSegmentSymbol(Index symbol_index) {
   return Result::Ok;
 }
 
-Offset BinaryReaderIR::MemoryOffsetFromDataRelocOffset(Offset reloc_offset) {
-  const auto& m = module_->data_segment_reloc_to_address_;
-  auto ptr = m.lower_bound(reloc_offset);
-  if (ptr == m.end()) {
-    return kInvalidOffset;
-  }
-  return ptr->second - (ptr->first - reloc_offset);
-}
-
-Result BinaryReaderIR::ValidateMemoryOffset(Offset memory_offset,
-                                            Index symbol_index) {
-  if (memory_offset == kInvalidOffset) {
-    PrintError("unable to determine memory offset for symbol %" PRIindex,
-               symbol_index);
-    return Result::Error;
-  }
-  return Result::Ok;
-}
-
 Result BinaryReaderIR::OnReloc(RelocType type,
                                Offset offset,
                                Index index,
@@ -1677,20 +1623,16 @@ Result BinaryReaderIR::OnReloc(RelocType type,
     case RelocType::TableIndexSLEB:
     case RelocType::TableIndexSLEB64:
       CHECK_RESULT(ValidateFunctionSymbol(index));
-      module_->function_symbol_by_function_pointer_load_offset_[offset] = index;
+      module_->function_symbol_by_fptr_load_offset_[offset] = index;
       break;
     case RelocType::TableIndexI32: {
       CHECK_RESULT(ValidateFunctionSymbol(index));
-      Offset memory_offset = MemoryOffsetFromDataRelocOffset(offset);
-      CHECK_RESULT(ValidateMemoryOffset(memory_offset, index));
-      module_->function_symbol_by_fptr32_init_offset_[memory_offset] = index;
+      module_->function_symbol_by_fptr32_init_offset_[offset] = index;
       break;
     }
     case RelocType::TableIndexI64: {
       CHECK_RESULT(ValidateFunctionSymbol(index));
-      Offset memory_offset = MemoryOffsetFromDataRelocOffset(offset);
-      CHECK_RESULT(ValidateMemoryOffset(memory_offset, index));
-      module_->function_symbol_by_fptr64_init_offset_[memory_offset] = index;
+      module_->function_symbol_by_fptr64_init_offset_[offset] = index;
       break;
     }
     case RelocType::MemoryAddressSLEB:
@@ -1698,22 +1640,18 @@ Result BinaryReaderIR::OnReloc(RelocType type,
     case RelocType::MemoryAddressLEB:
     case RelocType::MemoryAddressLEB64:
       CHECK_RESULT(ValidateDataSegmentSymbol(index));
-      module_->data_symbol_and_addend_by_memory_pointer_load_offset_[offset] =
+      module_->data_symbol_and_addend_by_mptr_load_offset_[offset] =
           std::make_pair(index, addend);
       break;
     case RelocType::MemoryAddressI32: {
       CHECK_RESULT(ValidateDataSegmentSymbol(index));
-      Offset memory_offset = MemoryOffsetFromDataRelocOffset(offset);
-      CHECK_RESULT(ValidateMemoryOffset(memory_offset, index));
-      module_->data_symbol_and_addend_by_mptr32_init_offset_[memory_offset] =
+      module_->data_symbol_and_addend_by_mptr32_init_offset_[offset] =
           std::make_pair(index, addend);
       break;
     }
     case RelocType::MemoryAddressI64: {
       CHECK_RESULT(ValidateDataSegmentSymbol(index));
-      Offset memory_offset = MemoryOffsetFromDataRelocOffset(offset);
-      CHECK_RESULT(ValidateMemoryOffset(memory_offset, index));
-      module_->data_symbol_and_addend_by_mptr64_init_offset_[memory_offset] =
+      module_->data_symbol_and_addend_by_mptr64_init_offset_[offset] =
           std::make_pair(index, addend);
       break;
     }

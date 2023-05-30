@@ -945,7 +945,8 @@ struct DataSegment {
   std::string name;
   Var memory_var;
   ExprList offset;
-  Offset data_offset;  // Start of payload within data section.
+  Offset data_offset;  // Start of payload within data section relative to
+                       // data_section_base_.
   std::vector<uint8_t> data;
 };
 
@@ -1260,15 +1261,6 @@ struct Module {
   std::unordered_map<Index, Index> function_symbols_;
   std::unordered_map<Index, Index> data_symbols_;
 
-  // Mapping from the encoding offset of data segment data (in the module
-  // encoding) to the corresponding address relative to the beginning of
-  // WASM memory.
-  // The entries are for the offset of the last byte of the payload's encoding
-  // relative to data_section_base_.  This arrangement makes it possibly to find
-  // relocation offsets within the segment using std::map::lower_bound. The
-  // value is the address of the same last byte within WASM memory.
-  std::map<Offset, Offset> data_segment_reloc_to_address_;
-
   // Mapping from a data symbol index to its name.  This mapping is only
   // constructed for data symbols that are marked undefined.
   std::unordered_map<Index, std::string> undefined_data_symbols_;
@@ -1276,12 +1268,13 @@ struct Module {
   // Mapping from offsets of function pointer loads (operands of ixx.const
   // instructions) to their correpsonding function relocation information,
   // represented simply by the function symbol index.
-  std::unordered_map<Offset, Index>
-      function_symbol_by_function_pointer_load_offset_;
+  // The offset is relative to code_section_base_.
+  std::unordered_map<Offset, Index> function_symbol_by_fptr_load_offset_;
 
-  // Mappings (ordered) from offsets of 32- and 64-bit function pointers within
-  // global data initializers to their corresponding function relocation
-  // information, represented simply by the function symbol index.
+  // Mappings from offsets of function pointers within data segments to their
+  // function relocation information, represented simply by the function symbol.
+  // The offset is relative to data_section_base_.
+  // One mapping is for 32-bit pointers, the other for 64-bit pointers.
   std::map<Offset, Index> function_symbol_by_fptr32_init_offset_;
   std::map<Offset, Index> function_symbol_by_fptr64_init_offset_;
 
@@ -1290,12 +1283,14 @@ struct Module {
   // represented by a pair consisting of the data segment symbol index and the
   // offset.
   std::unordered_map<Offset, std::pair<Index, uint32_t>>
-      data_symbol_and_addend_by_memory_pointer_load_offset_;
+      data_symbol_and_addend_by_mptr_load_offset_;
 
-  // Mapping from (ordered) offsets of 32- and 64-bit memory pointers within
+  // Mapping from (ordered) offsets to 32- and 64-bit memory pointers within
   // global data initializers to their corresponding data relocation
   // information, represented by a pair consisting of the data segment symbol
-  // index and the offset.
+  // index and and "addend" (an offset relative to the base represented by that
+  // symbol).
+  // The key offsets are relative to data_section_base_.
   std::map<Offset, std::pair<Index, uint32_t>>
       data_symbol_and_addend_by_mptr32_init_offset_;
   std::map<Offset, std::pair<Index, uint32_t>>

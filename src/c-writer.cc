@@ -1891,11 +1891,8 @@ void CWriter::WriteNoSandboxDataSegments() {
       UNIMPLEMENTED("droppable data segment in no-sandbox mode");
     }
 
-    Offset ceiling = module_->data_segment_reloc_to_address_
-                         .lower_bound(data_segment->data_offset)
-                         ->second +
-                     1;
-    Offset base = ceiling - data_segment->data.size();
+    Offset base = data_segment->data_offset;
+    Offset ceiling = base + data_segment->data.size();
 
     // Survey the data initialiser relocation maps.
     bool is64bit = false;  // found at least one 64-bit pointer initializer
@@ -1906,24 +1903,28 @@ void CWriter::WriteNoSandboxDataSegments() {
     const auto& d64map = module_->data_symbol_and_addend_by_mptr64_init_offset_;
     const auto& f32map = module_->function_symbol_by_fptr32_init_offset_;
     const auto& d32map = module_->data_symbol_and_addend_by_mptr32_init_offset_;
+
     for (auto f64 = f64map.lower_bound(base);
          f64 != f64map.end() && f64->first < ceiling; ++f64) {
       is64bit = true;
       reloc_map[f64->first] = true;
     }
+
     for (auto d64 = d64map.lower_bound(base);
          d64 != d64map.end() && d64->first < ceiling; ++d64) {
       is64bit = true;
       reloc_map[d64->first] = false;
     }
+
     for (auto f32 = f32map.lower_bound(base);
          f32 != f32map.end() && f32->first < ceiling; ++f32) {
       if (is64bit) {
         UNIMPLEMENTED(
             "32-bit function pointer initializer in 64-bit no-sandbox mode");
+        reloc_map[f32->first] = true;
       }
-      reloc_map[f32->first] = true;
     }
+
     for (auto d32 = d32map.lower_bound(base);
          d32 != d32map.end() && d32->first < ceiling; ++d32) {
       if (is64bit) {
@@ -1990,6 +1991,7 @@ void CWriter::WriteNoSandboxDataSegments() {
         cur = next;
       }
     }
+
     Write(CloseBrace(), ";", Newline());
   }
 }
@@ -4589,8 +4591,7 @@ bool CWriter::TryWriteNoSandboxFunctionAddress(Offset instruction_offset,
   int index_byte_length = is64bit ? 10 : 5;
   Offset reloc_offset =
       instruction_offset - index_byte_length - module_->code_section_base_;
-  auto& function_reloc_map =
-      module_->function_symbol_by_function_pointer_load_offset_;
+  auto& function_reloc_map = module_->function_symbol_by_fptr_load_offset_;
   auto function_reloc = function_reloc_map.find(reloc_offset);
   if (function_reloc == function_reloc_map.end()) {
     return false;
@@ -4608,7 +4609,7 @@ bool CWriter::TryWriteNoSandboxMemoryAddress(Offset instruction_offset,
   Offset reloc_offset =
       instruction_offset - index_byte_length - module_->code_section_base_;
   const auto& data_reloc_map =
-      module_->data_symbol_and_addend_by_memory_pointer_load_offset_;
+      module_->data_symbol_and_addend_by_mptr_load_offset_;
   auto data_reloc = data_reloc_map.find(reloc_offset);
   if (data_reloc == data_reloc_map.end()) {
     return false;
