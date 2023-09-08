@@ -1619,6 +1619,13 @@ Result BinaryReaderIR::OnReloc(RelocType type,
   if (options_.features.sandbox_enabled()) {
     return Result::Ok;
   }
+  // Relocations for debug symbols may be marked invalid using either -1 or -2
+  // as their index. See
+  // https://github.com/llvm/llvm-project/blob/5795e7ba3ed82f703b4494897ab63aa989e1ea69/lld/wasm/InputChunks.cpp#L517-L534
+  // for details.
+  if (index == static_cast<Index>(-1) || index == static_cast<Index>(-2)) {
+    return Result::Ok;
+  }
   switch (type) {
     case RelocType::TableIndexSLEB:
     case RelocType::TableIndexSLEB64:
@@ -1733,10 +1740,6 @@ Result BinaryReaderIR::OnDataSymbol(Index index,
     module_->undefined_data_symbols_[index] = name;
     return Result::Ok;
   }
-  if (segment >= module_->data_segments.size()) {
-    PrintError("invalid data segment index: %" PRIindex, segment);
-    return Result::Error;
-  }
   module_->data_symbols_[index] = segment;
   if (name.empty()) {
     return Result::Ok;
@@ -1745,6 +1748,12 @@ Result BinaryReaderIR::OnDataSymbol(Index index,
     // If it is pointing into the data segment, then it's not really naming
     // the whole segment.
     return Result::Ok;
+  }
+  if (segment >= module_->data_segments.size()) {
+    PrintError("invalid data segment index: %" PRIindex, segment);
+    PrintError("name is: %.*s, offset: %u", static_cast<int>(name.length()),
+               name.data(), offset);
+    return Result::Error;
   }
   DataSegment* seg = module_->data_segments[segment];
   std::string dollar_name =
