@@ -1620,6 +1620,7 @@ Result BinaryReaderIR::OnReloc(RelocType type,
     return Result::Ok;
   }
   switch (type) {
+    // test
     case RelocType::TableIndexSLEB:
     case RelocType::TableIndexSLEB64:
       CHECK_RESULT(ValidateFunctionSymbol(index));
