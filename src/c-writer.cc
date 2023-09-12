@@ -451,8 +451,8 @@ static constexpr char kSymbolPrefix[] = "w2c_";
 static constexpr char kAdminSymbolPrefix[] = "wasm2c_";
 
 constexpr std::string_view kEnvModuleName = "env";
-constexpr std::string_view kStackPointerName = "$__stack_pointer";
-constexpr std::string_view kStackPointerNameWithoutDollar = "__stack_pointer";
+constexpr std::string_view kStackPointerName = "$__stack_pointer.1";
+constexpr std::string_view kStackPointerNameWithoutDollar = "__stack_pointer.1";
 
 constexpr size_t kStackSize = 64 * 1024;
 constexpr size_t kStackBufferSize = 4 * 1024;
