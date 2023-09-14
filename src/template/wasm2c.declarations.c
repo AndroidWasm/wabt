@@ -1,7 +1,6 @@
-
 #define TRAP(x) (wasm_rt_trap(WASM_RT_TRAP_##x), 0)
 
-#if WASM_RT_USE_STACK_DEPTH_COUNT && !defined(NO_SANDBOX)
+#if WASM_RT_USE_STACK_DEPTH_COUNT
 #define FUNC_PROLOGUE                                            \
   if (++wasm_rt_call_stack_depth > WASM_RT_MAX_CALL_STACK_DEPTH) \
     TRAP(EXHAUSTION);
@@ -20,13 +19,11 @@ static inline bool func_types_eq(const wasm_rt_func_type_t a,
   return (a == b) || LIKELY(a && b && !memcmp(a, b, 32));
 }
 
-#ifndef NO_SANDBOX
 #define CALL_INDIRECT(table, t, ft, x, ...)              \
   (LIKELY((x) < table.size && table.data[x].func &&      \
           func_types_eq(ft, table.data[x].func_type)) || \
        TRAP(CALL_INDIRECT),                              \
    ((t)table.data[x].func)(__VA_ARGS__))
-#endif  // NO_SANDBOX
 
 #ifdef SUPPORT_MEMORY64
 #define RANGE_CHECK(mem, offset, len)              \
@@ -56,10 +53,6 @@ static inline bool func_types_eq(const wasm_rt_func_type_t a,
 #endif
 
 #if WABT_BIG_ENDIAN
-
-#ifdef NO_SANDBOX
-#error "Big endian is not supported in --no-sandbox mode"
-#endif
 
 static inline void load_data(void* dest, const void* src, size_t n) {
   if (!n) {
@@ -103,26 +96,13 @@ static inline void load_data(void* dest, const void* src, size_t n) {
   }
   memcpy(dest, src, n);
 }
+
 #define LOAD_DATA(m, o, i, s)      \
   do {                             \
     RANGE_CHECK((&m), o, s);       \
     load_data(&(m.data[o]), i, s); \
   } while (0)
-#ifdef NO_SANDBOX
-#define DEFINE_LOAD(name, t1, t2, t3)                       \
-  static inline t3 name(u64 addr) {                         \
-    t1 result;                                              \
-    wasm_rt_memcpy(&result, (const void*)addr, sizeof(t1)); \
-    wasm_asm("" ::"r"(result));                             \
-    return (t3)(t2)result;                                  \
-  }
 
-#define DEFINE_STORE(name, t1, t2)                     \
-  static inline void name(u64 addr, t2 value) {        \
-    t1 wrapped = (t1)value;                            \
-    wasm_rt_memcpy((void*)addr, &wrapped, sizeof(t1)); \
-  }
-#else  // NO_SANDBOX
 #define DEFINE_LOAD(name, t1, t2, t3)                      \
   static inline t3 name(wasm_rt_memory_t* mem, u64 addr) { \
     MEMCHECK(mem, addr, t1);                               \
@@ -138,7 +118,6 @@ static inline void load_data(void* dest, const void* src, size_t n) {
     t1 wrapped = (t1)value;                                            \
     wasm_rt_memcpy(&mem->data[addr], &wrapped, sizeof(t1));            \
   }
-#endif  // NO_SANDBOX
 #endif  // WABT_BIG_ENDIAN
 
 DEFINE_LOAD(i32_load, u32, u32, u32)
@@ -725,35 +704,6 @@ DEFINE_TABLE_SET(externref)
 
 DEFINE_TABLE_FILL(funcref)
 DEFINE_TABLE_FILL(externref)
-
-#ifdef NO_SANDBOX
-// TODO: This is a temporary workaround for env module, remove them if they are
-//  not needed or replace with proper implementation
-struct Z_env_instance_t {};
-
-wasm_rt_funcref_table_t* Z_envZ___indirect_function_table(
-    struct Z_env_instance_t* unused) {
-  return NULL;
-}
-
-u64* Z_envZ___memory_base(struct Z_env_instance_t* unused) {
-  return NULL;
-}
-
-u64* Z_envZ___table_base(struct Z_env_instance_t* unused) {
-  return NULL;
-}
-
-u32* Z_envZ___table_base32(struct Z_env_instance_t* unused) {
-  return NULL;
-}
-
-wasm_rt_memory_t* Z_envZ_memory(struct Z_env_instance_t* unused) {
-  return NULL;
-}
-
-// END OF evn workaround
-#endif  // NO_SANDBOX
 
 #if defined(__GNUC__) || defined(__clang__)
 #define FUNC_TYPE_T(x) static const char* const x
