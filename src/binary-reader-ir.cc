@@ -1740,7 +1740,7 @@ Result BinaryReaderIR::OnDataSymbol(Index index,
     module_->undefined_data_symbols_[index] = name;
     return Result::Ok;
   }
-  module_->data_symbols_[index] = segment;
+  module_->data_symbols_[index] = { segment, offset };
   if (name.empty()) {
     return Result::Ok;
   }

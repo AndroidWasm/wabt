@@ -1258,8 +1258,10 @@ struct Module {
 
   // Mappings from a symbol index (pointing into the symbol table from the
   // "linking" section) to their corresponding function- and data segment index.
+  // The data segment index is paired with an offset relative to the beginning of
+  // that data segment.
   std::unordered_map<Index, Index> function_symbols_;
-  std::unordered_map<Index, Index> data_symbols_;
+  std::unordered_map<Index, std::pair<Index, uint32_t>> data_symbols_;
 
   // Mapping from a data symbol index to its name.  This mapping is only
   // constructed for data symbols that are marked undefined.

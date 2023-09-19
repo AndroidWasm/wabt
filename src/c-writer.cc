@@ -4572,11 +4572,12 @@ void CWriter::WriteDataAddress(Index symbol_index,
         module_->undefined_data_symbols_.at(symbol_index);
     Write(external_name);
   } else {
-    Index data_segment_index = data_segment_index_ptr->second;
+    auto [data_segment_index, offset] = data_segment_index_ptr->second;
     const std::string& data_segment_name =
         module_->data_segments[data_segment_index]->name;
     Write("data_segment_data_",
           GlobalName(ModuleFieldType::DataSegment, data_segment_name));
+    addend += offset;
   }
   Write(")");
   if (addend > 0) {
