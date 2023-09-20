@@ -1641,7 +1641,6 @@ Result BinaryReaderIR::OnReloc(RelocType type,
   if (module_->current_reloc_section_ != BinarySection::Code &&
       module_->current_reloc_section_ != BinarySection::Data) {
     return Result::Ok;
-    ;
   }
   switch (type) {
     case RelocType::TableIndexSLEB:
