@@ -1853,20 +1853,37 @@ void CWriter::WriteDataInstances() {
   }
 }
 
+// Determines whether or not the selected data range contains only zero bytes.
+static bool is_all_zero(const DataSegment* segment,
+                        size_t start_index,
+                        size_t end_index) {
+  while (start_index < end_index) {
+    if (segment->data[start_index] != 0) {
+      return false;
+    }
+    ++start_index;
+  }
+  return true;
+}
+
 void CWriter::WriteBytes(const DataSegment* segment,
                          size_t start_index,
                          size_t end_index) {
   Write(OpenBrace());
-  for (size_t i = start_index; i < end_index; ++i) {
-    Writef("0x%02x,", segment->data.at(i));
-    if ((i - start_index + 1) % 12 == 0) {
-      Write(Newline());
-    } else if (i < end_index - 1) {
-      Write(" ");
+  if (!is_all_zero(segment, start_index, end_index)) {
+    for (size_t i = start_index; i < end_index; ++i) {
+      Writef("0x%02x,", segment->data.at(i));
+      if ((i - start_index + 1) % 12 == 0) {
+        Write(Newline());
+      } else if (i < end_index - 1) {
+        Write(" ");
+      }
     }
-  }
-  if ((end_index - start_index) % 12 != 0) {
-    Write(Newline());
+    if ((end_index - start_index) % 12 != 0) {
+      Write(Newline());
+    }
+  } else {
+    Write("/* all zero */", Newline());
   }
   Write(CloseBrace());
 }
