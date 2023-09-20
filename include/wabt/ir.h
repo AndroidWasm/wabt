@@ -29,6 +29,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "wabt/binary.h"
 #include "wabt/binding-hash.h"
 #include "wabt/common.h"
 #include "wabt/intrusive-list.h"
@@ -1255,6 +1256,7 @@ struct Module {
   // their section identifiers.
   Offset code_section_base_;
   Offset data_section_base_;
+  BinarySection current_reloc_section_ = BinarySection::Invalid;
 
   // Mappings from a symbol index (pointing into the symbol table from the
   // "linking" section) to their corresponding function- and data segment index.

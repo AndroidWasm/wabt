@@ -99,6 +99,10 @@ class BinaryReaderIR : public BinaryReaderNop {
 
   bool OnError(const Error&) override;
 
+  Result BeginSection(Index section_index,
+                      BinarySection section_type,
+                      Offset size) override;
+
   Result OnTypeCount(Index count) override;
   Result OnFuncType(Index index,
                     Index param_count,
@@ -315,6 +319,7 @@ class BinaryReaderIR : public BinaryReaderNop {
                      Index index,
                      std::string_view name) override;
 
+  Result OnRelocCount(Index count, Index section_index) override;
   Result OnReloc(RelocType type,
                  Offset offset,
                  Index index,
@@ -398,6 +403,8 @@ class BinaryReaderIR : public BinaryReaderNop {
   std::string_view current_metadata_name_;
 
   const ReadBinaryOptions& options_;
+
+  std::vector<BinarySection> section_types_;
 };
 
 BinaryReaderIR::BinaryReaderIR(Module* out_module,
@@ -502,6 +509,13 @@ std::string BinaryReaderIR::GetUniqueName(BindingHash* bindings,
 bool BinaryReaderIR::OnError(const Error& error) {
   errors_->push_back(error);
   return true;
+}
+
+Result BinaryReaderIR::BeginSection(Index section_index,
+                                    BinarySection section_code,
+                                    Offset size) {
+  section_types_.push_back(section_code);
+  return Result::Ok;
 }
 
 Result BinaryReaderIR::OnTypeCount(Index count) {
@@ -1612,6 +1626,11 @@ Result BinaryReaderIR::ValidateDataSegmentSymbol(Index symbol_index) {
   return Result::Ok;
 }
 
+Result BinaryReaderIR::OnRelocCount(Index count, Index section_index) {
+  module_->current_reloc_section_ = section_types_[section_index];
+  return Result::Ok;
+}
+
 Result BinaryReaderIR::OnReloc(RelocType type,
                                Offset offset,
                                Index index,
@@ -1619,11 +1638,8 @@ Result BinaryReaderIR::OnReloc(RelocType type,
   if (options_.features.sandbox_enabled()) {
     return Result::Ok;
   }
-  // Relocations for debug symbols may be marked invalid using either -1 or -2
-  // as their index. See
-  // https://github.com/llvm/llvm-project/blob/5795e7ba3ed82f703b4494897ab63aa989e1ea69/lld/wasm/InputChunks.cpp#L517-L534
-  // for details.
-  if (index == static_cast<Index>(-1) || index == static_cast<Index>(-2)) {
+  if (module_->current_reloc_section_ != BinarySection::Code &&
+      module_->current_reloc_section_ != BinarySection::Data) {
     return Result::Ok;
   }
   switch (type) {
@@ -1647,19 +1663,19 @@ Result BinaryReaderIR::OnReloc(RelocType type,
     case RelocType::MemoryAddressLEB:
     case RelocType::MemoryAddressLEB64:
       CHECK_RESULT(ValidateDataSegmentSymbol(index));
-      module_->data_symbol_and_addend_by_mptr_load_offset_[offset] =
-          std::make_pair(index, addend);
+      module_->data_symbol_and_addend_by_mptr_load_offset_[offset] = {index,
+                                                                      addend};
       break;
     case RelocType::MemoryAddressI32: {
       CHECK_RESULT(ValidateDataSegmentSymbol(index));
-      module_->data_symbol_and_addend_by_mptr32_init_offset_[offset] =
-          std::make_pair(index, addend);
+      module_->data_symbol_and_addend_by_mptr32_init_offset_[offset] = {index,
+                                                                        addend};
       break;
     }
     case RelocType::MemoryAddressI64: {
       CHECK_RESULT(ValidateDataSegmentSymbol(index));
-      module_->data_symbol_and_addend_by_mptr64_init_offset_[offset] =
-          std::make_pair(index, addend);
+      module_->data_symbol_and_addend_by_mptr64_init_offset_[offset] = {index,
+                                                                        addend};
       break;
     }
     default:
@@ -1740,7 +1756,7 @@ Result BinaryReaderIR::OnDataSymbol(Index index,
     module_->undefined_data_symbols_[index] = name;
     return Result::Ok;
   }
-  module_->data_symbols_[index] = { segment, offset };
+  module_->data_symbols_[index] = {segment, offset};
   if (name.empty()) {
     return Result::Ok;
   }
