@@ -1284,7 +1284,7 @@ void CWriter::WriteInitExpr(const ExprList& expr_list) {
 }
 
 std::string CWriter::GenerateHeaderGuard() const {
-  std::string result;
+  std::string result = "_";
   for (char c : header_name_) {
     if (isalnum(c) || c == '_') {
       result += toupper(c);
