@@ -83,14 +83,15 @@ DEFINE_STORE(i64_store32, u32, u64)
 
 // Unchecked variants of division and remainder.
 #define DIV_S(ut, min, x, y) ((ut)((x) / (y)))
-#define REM_S(ut, min, x, y) ((ut)((x) % (y)))
-#define DIVREM_U(op, x, y) ((x)op(y))
+#define REM_S(ut, min, x, y) \
+  ((UNLIKELY((x) == min && (y) == -1)) ? 0 : (ut)((x) % (y)))
 
 #define I32_DIV_S(x, y) DIV_S(u32, INT32_MIN, (s32)x, (s32)y)
 #define I64_DIV_S(x, y) DIV_S(u64, INT64_MIN, (s64)x, (s64)y)
 #define I32_REM_S(x, y) REM_S(u32, INT32_MIN, (s32)x, (s32)y)
 #define I64_REM_S(x, y) REM_S(u64, INT64_MIN, (s64)x, (s64)y)
 
+#define DIVREM_U(op, x, y) ((x)op(y))
 #define DIV_U(x, y) DIVREM_U(/, x, y)
 #define REM_U(x, y) DIVREM_U(%, x, y)
 
