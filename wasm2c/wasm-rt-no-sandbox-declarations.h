@@ -106,4 +106,15 @@ DEFINE_STORE(i64_store32, u32, u64)
 
 // TODO: floating point
 
+extern u32 open(u64, u32, ...);
+
+inline static u32 wasm_open2(u64 p, u32 f) {
+  return open(p, f);
+}
+
+inline static u32 wasm_open3(u64 p, u32 f, u32 m) {
+  return open(p, f, m);
+}
+
+
 #endif /* WASM_RT_NO_SANDBOX_DECLARATIONS_H_ */

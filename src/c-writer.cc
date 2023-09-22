@@ -31,6 +31,9 @@
 #include "wabt/stream.h"
 #include "wabt/string-util.h"
 
+#define WASM_SPECIAL_PREFIX "wasm_"
+#define INTERNAL_MAIN_NAME "__main_argc_argv"
+
 #define INDENT_SIZE 2
 
 #define UNIMPLEMENTED(x) printf("unimplemented: %s\n", (x)), abort()
@@ -1605,19 +1608,21 @@ void CWriter::WriteImportsNoSandbox() {
 
   for (const Import* import : unique_imports_) {
     if (import->kind() == ExternalKind::Func) {
-      Write("/* import: '", import->module_name, "' '", import->field_name,
-            "' */", Newline());
-      const Func& func = cast<FuncImport>(import)->func;
-      if (import->module_name == kEnvModuleName) {
-        WriteImportFuncDeclaration(func.decl, import->module_name,
-                                   import->field_name);
-      } else {
-        WriteImportFuncDeclaration(
-            func.decl, import->module_name,
-            MangleName(import->module_name) + MangleName(import->field_name));
+      if (import->field_name.rfind(WASM_SPECIAL_PREFIX, 0) != 0) {
+        Write("/* import: '", import->module_name, "' '", import->field_name,
+              "' */", Newline());
+        const Func& func = cast<FuncImport>(import)->func;
+        if (import->module_name == kEnvModuleName) {
+          WriteImportFuncDeclaration(func.decl, import->module_name,
+                                     import->field_name);
+        } else {
+          WriteImportFuncDeclaration(
+              func.decl, import->module_name,
+              MangleName(import->module_name) + MangleName(import->field_name));
+        }
+        Write(";");
+        Write(Newline());
       }
-      Write(";");
-      Write(Newline());
     } else if (import->kind() == ExternalKind::Tag) {
       Write("/* import: '", import->module_name, "' '", import->field_name,
             "' */", Newline());
@@ -2370,6 +2375,14 @@ void CWriter::WriteExports(CWriterPhase kind) {
         local_sym_map_.clear();
         stack_var_sym_map_.clear();
         func_ = nullptr;
+
+        if (!options_.features.sandbox_enabled() &&
+            export_->name == INTERNAL_MAIN_NAME) {
+          Write(Newline(), "int main(int argc, char **argv) ", OpenBrace());
+          Write("return (int)", INTERNAL_MAIN_NAME, "((u32)argc, (u64)argv);",
+                Newline());
+          Write(CloseBrace());
+        }
         break;
       }
 
@@ -5342,7 +5355,6 @@ void CWriter::WriteCHeader() {
   if (options_.features.sandbox_enabled()) {
     WriteImports();
   } else {
-    WriteUndefinedSymbolDeclarationsNoSandbox();
     WriteImportsNoSandbox();
   }
   WriteImportProperties(CWriterPhase::Declarations);
@@ -5359,6 +5371,9 @@ void CWriter::WriteCSource() {
   WriteFuncTypes();
   WriteTagTypes();
   WriteTags();
+  if (!options_.features.sandbox_enabled()) {
+    WriteUndefinedSymbolDeclarationsNoSandbox();
+  }
   WriteFuncDeclarations();
   WriteGlobalInitializers();
   WriteDataInitializers();
