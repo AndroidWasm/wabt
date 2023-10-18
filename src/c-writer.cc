@@ -1599,6 +1599,17 @@ void CWriter::WriteUndefinedSymbolDeclarationsNoSandbox() {
   }
 }
 
+// Checks for names that are already defined in the header and would therefore
+// cause clashes between incompatible declarations.
+// (This currently only concerns certain functions from <math.h> that are needed
+// to implement floating point primitives.)
+static bool isExcludedNoSandboxImport(const std::string& name) {
+  return name == "floor" || name == "floorf" || name == "ceil" ||
+         name == "ceilf" || name == "trunc" || name == "truncf" ||
+         name == "nearbyint" || name == "nearbyintf" || name == "fabs" ||
+         name == "fabsf" || name == "sqrt" || name == "sqrtf";
+}
+
 // Write module-wide imports (funcs & tags), which aren't tied to an instance.
 void CWriter::WriteImportsNoSandbox() {
   if (module_->imports.empty())
@@ -1612,9 +1623,13 @@ void CWriter::WriteImportsNoSandbox() {
         Write("/* import: '", import->module_name, "' '", import->field_name,
               "' */", Newline());
         const Func& func = cast<FuncImport>(import)->func;
+        // TODO: this logic needs work - we don't expect anything but kEnvModuleName in
+        // no-sandbox mode.
         if (import->module_name == kEnvModuleName) {
-          WriteImportFuncDeclaration(func.decl, import->module_name,
-                                     import->field_name);
+          if (!isExcludedNoSandboxImport(import->field_name)) {
+            WriteImportFuncDeclaration(func.decl, import->module_name,
+                                       import->field_name);
+          }
         } else {
           WriteImportFuncDeclaration(
               func.decl, import->module_name,
