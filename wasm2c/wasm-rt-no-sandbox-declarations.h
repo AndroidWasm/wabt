@@ -28,8 +28,8 @@ extern u32 fputs(u64, u64);
 extern char stderr;
 extern u32 write(u32, u64, u64);
 
-static inline int wasm_rt_trap(const char* msg, size_t n) {
-    write(2, (u64)msg, (u64) n);
+static inline int wasm_rt_trap(const char* msg, u64 n) {
+    write(2, (u64)msg, n);
     __builtin_abort();
     return 0;
 }
