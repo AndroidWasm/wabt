@@ -1623,8 +1623,8 @@ void CWriter::WriteImportsNoSandbox() {
         Write("/* import: '", import->module_name, "' '", import->field_name,
               "' */", Newline());
         const Func& func = cast<FuncImport>(import)->func;
-        // TODO: this logic needs work - we don't expect anything but kEnvModuleName in
-        // no-sandbox mode.
+        // TODO: this logic needs work - we don't expect anything but
+        // kEnvModuleName in no-sandbox mode.
         if (import->module_name == kEnvModuleName) {
           if (!isExcludedNoSandboxImport(import->field_name)) {
             WriteImportFuncDeclaration(func.decl, import->module_name,
@@ -1768,8 +1768,9 @@ void CWriter::WriteStackPointerGlobal(const Global& global) {
   // We also add a range check against kStackSize on GlobalSet,
   // note that since leaf functions do not set the __stack_pointer
   // they won't trigger the range check in global.set
-  Write("WASM_RT_THREAD_LOCAL uint8_t ", kStackArrayVariableName, "[",
-        kStackSize, " + ", kStackBufferSize, "];", Newline());
+  Write("WASM_RT_THREAD_LOCAL uint8_t __attribute__((aligned(16))) ",
+        kStackArrayVariableName, "[", kStackSize, " + ", kStackBufferSize, "];",
+        Newline());
   Write("WASM_RT_THREAD_LOCAL uintptr_t ", kStackOffsetGlobalVariableName,
         " = sizeof(", kStackArrayVariableName, ");", Newline());
 }
