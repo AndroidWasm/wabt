@@ -1602,12 +1602,14 @@ void CWriter::WriteUndefinedSymbolDeclarationsNoSandbox() {
 // Checks for names that are already defined in the header and would therefore
 // cause clashes between incompatible declarations.
 // (This currently only concerns certain functions from <math.h> that are needed
-// to implement floating point primitives.)
+// to implement floating point primitives and write which is used in wasm-rt
+// implementation of printf)
 static bool isExcludedNoSandboxImport(const std::string& name) {
   return name == "floor" || name == "floorf" || name == "ceil" ||
          name == "ceilf" || name == "trunc" || name == "truncf" ||
          name == "nearbyint" || name == "nearbyintf" || name == "fabs" ||
-         name == "fabsf" || name == "sqrt" || name == "sqrtf";
+         name == "fabsf" || name == "sqrt" || name == "sqrtf" ||
+         name == "write";
 }
 
 // Write module-wide imports (funcs & tags), which aren't tied to an instance.
