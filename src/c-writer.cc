@@ -132,6 +132,11 @@ struct StackVar {
   Type type;
 };
 
+struct VaTempVar {
+  explicit VaTempVar(Index index) : index(index) {}
+  Index index;
+};
+
 struct TypeEnum {
   explicit TypeEnum(Type type) : type(type) {}
   Type type;
@@ -207,9 +212,9 @@ class CWriter {
   void PushTypes(const TypeVector&);
   void DropTypes(size_t count);
 
-  void SetVarargs(size_t count);
+  void NewVarargs(Index count);
   bool IsVarargs() const;
-  size_t TakeVarargs();
+  Index TakeVarargs();
 
   void PushLabel(LabelType,
                  const std::string& name,
@@ -298,6 +303,7 @@ class CWriter {
   void Write(const LabelDecl&);
   void Write(const GlobalInstanceVar&);
   void Write(const StackVar&);
+  void Write(const VaTempVar&);
   void Write(const ResultType&);
   void Write(const Const&);
   void WriteInitExpr(const ExprList&);
@@ -447,7 +453,7 @@ class CWriter {
   std::vector<std::string> unique_func_type_names_;
   const Global* stack_pointer_global_ = nullptr;
 
-  size_t varargs_len_ = SIZE_MAX;  // SIZE_MAX means no active varargs
+  Index varargs_len_ = kInvalidIndex;
 };
 
 // TODO: if WABT begins supporting debug names for labels,
@@ -500,19 +506,20 @@ void CWriter::DropTypes(size_t count) {
   type_stack_.erase(type_stack_.end() - count, type_stack_.end());
 }
 
-void CWriter::SetVarargs(size_t count) {
-  assert(varargs_len_ == SIZE_MAX && count <= type_stack_.size());
+void CWriter::NewVarargs(Index count) {
+  assert(varargs_len_ == kInvalidIndex);
   varargs_len_ = count;
 }
 
 bool CWriter::IsVarargs() const {
-  return varargs_len_ < SIZE_MAX;
+  return varargs_len_ != kInvalidIndex;
 }
 
-size_t CWriter::TakeVarargs() {
-  size_t r = varargs_len_;
-  varargs_len_ = SIZE_MAX;
-  return r;
+Index CWriter::TakeVarargs() {
+  assert(varargs_len_ != kInvalidIndex);
+  Index l = varargs_len_;
+  varargs_len_ = kInvalidIndex;
+  return l;
 }
 
 static bool isVarargsAllocatorFun(const std::string& s) {
@@ -1125,6 +1132,10 @@ void CWriter::Write(const StackVar& sv) {
   } else {
     Write(iter->second);
   }
+}
+
+void CWriter::Write(const VaTempVar& v) {
+  Write(kSymbolPrefix, "va_", std::to_string(v.index));
 }
 
 void CWriter::Write(Type type) {
@@ -3140,13 +3151,23 @@ void CWriter::Write(const ExprList& exprs) {
 
         if (isVarargsAllocatorFun(var.name())) {
           assert(num_results == 1);
-          SetVarargs(num_params);
+          Write(OpenBrace());
+          for (Index i = 0; i < num_params; ++i) {
+            Write(StackType(i), " ", VaTempVar(i), " = ", StackVar(i), ";", Newline());
+          }
+          NewVarargs(num_params);
+          DropTypes(num_params);
+          PushType(Type::VarargsPlaceholder);
           break;
         }
 
-        if (IsVarargs()) {
-          num_params += TakeVarargs();
+        Index num_vparams = 0;
+        bool is_varargs = IsVarargs();
+        if (is_varargs) {
+          num_vparams = TakeVarargs();
           num_params -= 1;
+          assert(StackType(0) == Type::VarargsPlaceholder);
+          DropTypes(1);
         }
 
         assert(type_stack_.size() >= num_params);
@@ -3179,7 +3200,20 @@ void CWriter::Write(const ExprList& exprs) {
           }
           Write(StackVar(num_params - i - 1));
         }
+
+        // Write variable portion of argument list.
+        for (Index i = 0; i < num_vparams; ++i) {
+          if (needs_comma) {
+            Write(", ");
+          } else {
+            needs_comma = true;
+          }
+          Write(VaTempVar(i));
+        }
+
+        // Close the argument list and finish the call.
         Write(");", Newline());
+ 
         DropTypes(num_params);
         if (num_results > 1) {
           for (Index i = 0; i < num_results; ++i) {
@@ -3193,7 +3227,12 @@ void CWriter::Write(const ExprList& exprs) {
         } else {
           PushTypes(func.decl.sig.result_types);
         }
-        break;
+
+        // Leave scope of varargs temp
+        if (is_varargs) {
+          Write(CloseBrace(), Newline());
+        }
+       break;
       }
 
       case ExprType::CallIndirect: {
@@ -3202,11 +3241,7 @@ void CWriter::Write(const ExprList& exprs) {
         Index num_results = decl.GetNumResults();
 
         bool is_varargs = IsVarargs();
-        if (is_varargs) {
-          num_params += TakeVarargs();
-          num_params -= 1;
-        }
-
+        
         assert(type_stack_.size() > num_params);
         if (num_results > 1) {
           Write(OpenBrace());
@@ -3236,16 +3271,35 @@ void CWriter::Write(const ExprList& exprs) {
                 ".data[", StackVar(0), "].module_instance");
           needs_comma = true;
         }
+        DropTypes(1);
+
+        Index num_vparams = 0;
+        if (is_varargs) {
+          assert(num_params > 1);
+          num_params -= 1;
+          num_vparams = TakeVarargs();
+          assert(StackType(0) == Type::VarargsPlaceholder);
+          DropTypes(1);
+        }
+
         for (Index i = 0; i < num_params; ++i) {
           if (needs_comma) {
             Write(", ");
           } else {
             needs_comma = true;
           }
-          Write(StackVar(num_params - i));
+          Write(StackVar(num_params - i - 1));
+        }
+        for (Index i = 0; i < num_vparams; ++i) {
+          if (needs_comma) {
+            Write(", ");
+          } else {
+            needs_comma = true;
+          }
+          Write(VaTempVar(i));
         }
         Write(");", Newline());
-        DropTypes(num_params + 1);
+        DropTypes(num_params);
         if (num_results > 1) {
           for (Index i = 0; i < num_results; ++i) {
             Type type = decl.GetResultType(i);
@@ -3257,6 +3311,9 @@ void CWriter::Write(const ExprList& exprs) {
           Write(CloseBrace(), Newline());
         } else {
           PushTypes(decl.sig.result_types);
+        }
+        if (is_varargs) {
+          Write(CloseBrace(), Newline());
         }
         break;
       }
