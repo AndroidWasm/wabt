@@ -320,7 +320,8 @@ class CWriter {
                                   const std::string& name,
                                   bool is_varargs = false);
   void WriteCallIndirectFuncDeclaration(const FuncDeclaration&,
-                                        const std::string&);
+                                        const std::string&,
+                                        bool is_varargs = false);
   void WriteModuleInstance();
   void WriteGlobals();
   void WriteStackPointerGlobal(const Global& global);
@@ -1758,12 +1759,13 @@ void CWriter::WriteImportFuncDeclaration(const FuncDeclaration& decl,
 }
 
 void CWriter::WriteCallIndirectFuncDeclaration(const FuncDeclaration& decl,
-                                               const std::string& name) {
+                                               const std::string& name,
+                                               bool is_varargs) {
   Write(ResultType(decl.sig.result_types), " ", name, "(");
   if (options_.features.sandbox_enabled()) {
     Write("void*");
   }
-  WriteParamTypes(decl);
+  WriteParamTypes(decl, is_varargs);
   Write(")");
 }
 
@@ -3198,6 +3200,13 @@ void CWriter::Write(const ExprList& exprs) {
         const FuncDeclaration& decl = cast<CallIndirectExpr>(&expr)->decl;
         Index num_params = decl.GetNumParams();
         Index num_results = decl.GetNumResults();
+
+        bool is_varargs = IsVarargs();
+        if (is_varargs) {
+          num_params += TakeVarargs();
+          num_params -= 1;
+        }
+
         assert(type_stack_.size() > num_params);
         if (num_results > 1) {
           Write(OpenBrace());
@@ -3210,7 +3219,7 @@ void CWriter::Write(const ExprList& exprs) {
         bool needs_comma = false;
         if (!options_.features.sandbox_enabled()) {
           Write("((");
-          WriteCallIndirectFuncDeclaration(decl, "(*)");
+          WriteCallIndirectFuncDeclaration(decl, "(*)", is_varargs);
           Write(")", StackVar(0), ")(");
         } else {
           const Table* table =
