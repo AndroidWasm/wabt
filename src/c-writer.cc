@@ -32,6 +32,7 @@
 #include "wabt/string-util.h"
 
 #define WASM_SPECIAL_PREFIX "wasm_"
+#define WASM_ALLOCATE_VARARGS "__wasm_allocate_varargs"
 #define INTERNAL_MAIN_NAME "__main_argc_argv"
 
 #define INDENT_SIZE 2
@@ -206,6 +207,10 @@ class CWriter {
   void PushTypes(const TypeVector&);
   void DropTypes(size_t count);
 
+  void SetVarargs(size_t count);
+  bool IsVarargs() const;
+  size_t TakeVarargs();
+
   void PushLabel(LabelType,
                  const std::string& name,
                  const FuncSignature&,
@@ -312,7 +317,8 @@ class CWriter {
   void WriteFuncDeclaration(const FuncDeclaration&, const std::string&);
   void WriteImportFuncDeclaration(const FuncDeclaration&,
                                   const std::string& module_name,
-                                  const std::string& name);
+                                  const std::string& name,
+                                  bool is_varargs = false);
   void WriteCallIndirectFuncDeclaration(const FuncDeclaration&,
                                         const std::string&);
   void WriteModuleInstance();
@@ -351,7 +357,7 @@ class CWriter {
   void WriteParamsAndLocals();
   void WriteParams(const std::vector<std::string>& index_to_name);
   void WriteParamSymbols(const std::vector<std::string>& index_to_name);
-  void WriteParamTypes(const FuncDeclaration& decl);
+  void WriteParamTypes(const FuncDeclaration& decl, bool is_varargs = false);
   void WriteLocals(const std::vector<std::string>& index_to_name);
   void WriteStackVarDeclarations();
   void Write(const ExprList&);
@@ -439,6 +445,8 @@ class CWriter {
 
   std::vector<std::string> unique_func_type_names_;
   const Global* stack_pointer_global_ = nullptr;
+
+  size_t varargs_len_ = SIZE_MAX;  // SIZE_MAX means no active varargs
 };
 
 // TODO: if WABT begins supporting debug names for labels,
@@ -489,6 +497,25 @@ void CWriter::PushTypes(const TypeVector& types) {
 void CWriter::DropTypes(size_t count) {
   assert(count <= type_stack_.size());
   type_stack_.erase(type_stack_.end() - count, type_stack_.end());
+}
+
+void CWriter::SetVarargs(size_t count) {
+  assert(varargs_len_ == SIZE_MAX && count <= type_stack_.size());
+  varargs_len_ = count;
+}
+
+bool CWriter::IsVarargs() const {
+  return varargs_len_ < SIZE_MAX;
+}
+
+size_t CWriter::TakeVarargs() {
+  size_t r = varargs_len_;
+  varargs_len_ = SIZE_MAX;
+  return r;
+}
+
+static bool isVarargsAllocatorFun(const std::string& s) {
+  return s.rfind(WASM_ALLOCATE_VARARGS, 1) < 2; // tolerate $ at index 0
 }
 
 void CWriter::PushLabel(LabelType label_type,
@@ -1619,18 +1646,31 @@ void CWriter::WriteImportsNoSandbox() {
 
   Write(Newline());
 
+  std::unordered_set<std::string> varargs_functions;
+  for (const Import* import : unique_imports_) {
+    if (import->kind() == ExternalKind::Func && isVarargsAllocatorFun(import->field_name)) {
+      size_t percent_pos = import->field_name.rfind('%');
+      if (percent_pos != std::string::npos) {
+        varargs_functions.insert(import->field_name.substr(percent_pos + 1));
+      }
+    }
+  }
+
   for (const Import* import : unique_imports_) {
     if (import->kind() == ExternalKind::Func) {
-      if (import->field_name.rfind(WASM_SPECIAL_PREFIX, 0) != 0) {
+      if (import->field_name.rfind(WASM_SPECIAL_PREFIX, 0) != 0 &&
+          !isVarargsAllocatorFun(import->field_name)) {
+        const Func& func = cast<FuncImport>(import)->func;
         Write("/* import: '", import->module_name, "' '", import->field_name,
               "' */", Newline());
-        const Func& func = cast<FuncImport>(import)->func;
         // TODO: this logic needs work - we don't expect anything but
         // kEnvModuleName in no-sandbox mode.
         if (import->module_name == kEnvModuleName) {
           if (!isExcludedNoSandboxImport(import->field_name)) {
             WriteImportFuncDeclaration(func.decl, import->module_name,
-                                       import->field_name);
+                                       import->field_name,
+                                       varargs_functions.find(import->field_name) !=
+                                         varargs_functions.end());
           }
         } else {
           WriteImportFuncDeclaration(
@@ -1707,12 +1747,13 @@ void CWriter::WriteFuncDeclaration(const FuncDeclaration& decl,
 
 void CWriter::WriteImportFuncDeclaration(const FuncDeclaration& decl,
                                          const std::string& module_name,
-                                         const std::string& name) {
+                                         const std::string& name,
+                                         bool is_varargs) {
   Write(ResultType(decl.sig.result_types), " ", name, "(");
   if (options_.features.sandbox_enabled()) {
     Write("struct ", ModuleInstanceTypeName(module_name), "*");
   }
-  WriteParamTypes(decl);
+  WriteParamTypes(decl, is_varargs);
   Write(")");
 }
 
@@ -2774,7 +2815,7 @@ void CWriter::WriteParamSymbols(const std::vector<std::string>& index_to_name) {
   Write(");", Newline());
 }
 
-void CWriter::WriteParamTypes(const FuncDeclaration& decl) {
+void CWriter::WriteParamTypes(const FuncDeclaration& decl, bool is_varargs) {
   bool needs_comma = options_.features.sandbox_enabled();
   if (decl.GetNumParams() != 0) {
     for (Index i = 0; i < decl.GetNumParams(); ++i) {
@@ -2783,7 +2824,11 @@ void CWriter::WriteParamTypes(const FuncDeclaration& decl) {
       } else {
         needs_comma = true;
       }
-      Write(decl.GetParamType(i));
+      if (is_varargs && i == decl.GetNumParams() - 1) {
+        Write("...");
+      } else {
+        Write(decl.GetParamType(i));
+      }
     }
   }
 }
@@ -3085,10 +3130,25 @@ void CWriter::Write(const ExprList& exprs) {
 
       case ExprType::Call: {
         const Var& var = cast<CallExpr>(&expr)->var;
+        assert(var.is_name());
+
         const Func& func = *module_->GetFunc(var);
         Index num_params = func.GetNumParams();
         Index num_results = func.GetNumResults();
+
+        if (isVarargsAllocatorFun(var.name())) {
+          assert(num_results == 1);
+          SetVarargs(num_params);
+          break;
+        }
+
+        if (IsVarargs()) {
+          num_params += TakeVarargs();
+          num_params -= 1;
+        }
+
         assert(type_stack_.size() >= num_params);
+
         if (num_results > 1) {
           Write(OpenBrace());
           Write("struct ", MangleMultivalueTypes(func.decl.sig.result_types));
@@ -3097,7 +3157,6 @@ void CWriter::Write(const ExprList& exprs) {
           Write(StackVar(num_params - 1, func.GetResultType(0)), " = ");
         }
 
-        assert(var.is_name());
         Write(ExternalRef(ModuleFieldType::Func, var.name()), "(");
         if (options_.features.sandbox_enabled()) {
           bool is_import = import_module_sym_map_.count(func.name) != 0;
@@ -3108,7 +3167,7 @@ void CWriter::Write(const ExprList& exprs) {
             Write("instance");
           }
         }
-
+ 
         bool needs_comma = options_.features.sandbox_enabled();
         for (Index i = 0; i < num_params; ++i) {
           if (needs_comma) {
