@@ -212,7 +212,7 @@ class CWriter {
   void PushTypes(const TypeVector&);
   void DropTypes(size_t count);
 
-  void NewVarargs(Index count);
+  void PrepareVarargs(Index count);
   bool IsVarargs() const;
   Index TakeVarargs();
 
@@ -419,6 +419,8 @@ class CWriter {
 
   void PushFuncSection(std::string_view include_condition = "");
 
+  bool IsImport(const std::string& name) const;
+
   const WriteCOptions& options_;
   const Module* module_ = nullptr;
   const Func* func_ = nullptr;
@@ -437,7 +439,6 @@ class CWriter {
   StackVarSymbolMap stack_var_sym_map_;
   SymbolSet global_syms_;
   SymbolSet local_syms_;
-  SymbolSet import_syms_;
   TypeVector type_stack_;
   std::vector<Label> label_stack_;
   std::vector<TryCatchLabel> try_catch_stack_;
@@ -453,7 +454,8 @@ class CWriter {
   std::vector<std::string> unique_func_type_names_;
   const Global* stack_pointer_global_ = nullptr;
 
-  Index varargs_len_ = kInvalidIndex;
+  bool varargs_prepared_ = false;
+  TypeVector varargs_types_;
 };
 
 // TODO: if WABT begins supporting debug names for labels,
@@ -506,19 +508,25 @@ void CWriter::DropTypes(size_t count) {
   type_stack_.erase(type_stack_.end() - count, type_stack_.end());
 }
 
-void CWriter::NewVarargs(Index count) {
-  assert(varargs_len_ == kInvalidIndex);
-  varargs_len_ = count;
+void CWriter::PrepareVarargs(Index count) {
+  assert(!varargs_prepared_);
+  assert(varargs_types_.empty());
+  varargs_prepared_ = true;
+  for (Index i = 0; i < count; ++i) {
+    varargs_types_.push_back(StackType(count - i - 1));
+  }
+  DropTypes(count);
 }
 
 bool CWriter::IsVarargs() const {
-  return varargs_len_ != kInvalidIndex;
+  return varargs_prepared_;
 }
 
 Index CWriter::TakeVarargs() {
-  assert(varargs_len_ != kInvalidIndex);
-  Index l = varargs_len_;
-  varargs_len_ = kInvalidIndex;
+  assert(varargs_prepared_);
+  Index l = varargs_types_.size();
+  varargs_prepared_ = false;
+  varargs_types_.clear();
   return l;
 }
 
@@ -866,7 +874,6 @@ void CWriter::DefineImportName(const Import* import,
       break;
   }
 
-  import_syms_.insert(name);
   import_module_sym_map_.emplace(name, import->module_name);
 
   std::string mangled;
@@ -1038,24 +1045,21 @@ void CWriter::Write(const GlobalName& name) {
 }
 
 void CWriter::Write(const ExternalPtr& name) {
-  bool is_import = import_syms_.count(name.name) != 0;
-  if (!is_import || !options_.features.sandbox_enabled()) {
+  if (!IsImport(name.name) || !options_.features.sandbox_enabled()) {
     Write("&");
   }
   Write(GlobalName(name));
 }
 
 void CWriter::Write(const ExternalInstancePtr& name) {
-  bool is_import = import_syms_.count(name.name) != 0;
-  if (!is_import) {
+  if (!IsImport(name.name)) {
     Write("&");
   }
   Write("instance->", GlobalName(name));
 }
 
 void CWriter::Write(const ExternalRef& name) {
-  bool is_import = import_syms_.count(name.name) != 0;
-  if (is_import && options_.features.sandbox_enabled()) {
+  if (IsImport(name.name) && options_.features.sandbox_enabled()) {
     Write("(*", GlobalName(name), ")");
   } else {
     Write(GlobalName(name));
@@ -1063,8 +1067,7 @@ void CWriter::Write(const ExternalRef& name) {
 }
 
 void CWriter::Write(const ExternalInstanceRef& name) {
-  bool is_import = import_syms_.count(name.name) != 0;
-  if (is_import) {
+  if (IsImport(name.name)) {
     Write("(*instance->", GlobalName(name), ")");
   } else {
     Write("instance->", GlobalName(name));
@@ -1305,7 +1308,7 @@ void CWriter::WriteInitExpr(const ExprList& expr_list) {
             "(wasm_rt_function_ptr_t)",
             ExternalPtr(ModuleFieldType::Func, func->name), ", ");
 
-      bool is_import = import_module_sym_map_.count(func->name) != 0;
+      bool is_import = IsImport(func->name);
       if (is_import) {
         Write("instance->", GlobalName(ModuleFieldType::Import,
                                        import_module_sym_map_[func->name]));
@@ -2231,7 +2234,7 @@ void CWriter::WriteElemInitializers() {
           const FuncType* func_type = module_->GetFuncType(func->decl.type_var);
           Write("{", FuncTypeExpr(func_type), ", (wasm_rt_function_ptr_t)",
                 ExternalPtr(ModuleFieldType::Func, func->name), ", ");
-          const bool is_import = import_module_sym_map_.count(func->name) != 0;
+          const bool is_import = IsImport(func->name);
           if (is_import) {
             Write("offsetof(", ModuleInstanceTypeName(), ", ",
                   GlobalName(ModuleFieldType::Import,
@@ -2432,7 +2435,7 @@ void CWriter::WriteExports(CWriterPhase kind) {
         Write("return ", ExternalRef(ModuleFieldType::Func, internal_name),
               "(");
         if (options_.features.sandbox_enabled()) {
-          bool is_import = import_module_sym_map_.count(internal_name) != 0;
+          bool is_import = IsImport(internal_name);;
           if (is_import) {
             Write("instance->",
                   GlobalName(ModuleFieldType::Import,
@@ -2533,8 +2536,7 @@ void CWriter::WriteInit() {
 
   for (Var* var : module_->starts) {
     Write(ExternalRef(ModuleFieldType::Func, module_->GetFunc(*var)->name));
-    bool is_import =
-        import_module_sym_map_.count(module_->GetFunc(*var)->name) != 0;
+    bool is_import = IsImport(module_->GetFunc(*var)->name);
     if (is_import) {
       Write("(instance->",
             GlobalName(ModuleFieldType::Import,
@@ -2714,6 +2716,10 @@ void CWriter::WriteFuncs() {
 void CWriter::PushFuncSection(std::string_view include_condition) {
   func_sections_.emplace_back(include_condition, MemoryStream{});
   stream_ = &func_sections_.back().second;
+}
+
+bool CWriter::IsImport(const std::string& name) const {
+  return import_module_sym_map_.find(name) != import_module_sym_map_.end();
 }
 
 void CWriter::Write(const Func& func) {
@@ -3153,10 +3159,12 @@ void CWriter::Write(const ExprList& exprs) {
           assert(num_results == 1);
           Write(OpenBrace());
           for (Index i = 0; i < num_params; ++i) {
-            Write(StackType(i), " ", VaTempVar(i), " = ", StackVar(i), ";", Newline());
+            Write(StackType(num_params - i - 1), " ",
+                  VaTempVar(i), " = ",
+                  StackVar(num_params - i - 1),
+                  ";", Newline());
           }
-          NewVarargs(num_params);
-          DropTypes(num_params);
+          PrepareVarargs(num_params);
           PushType(Type::VarargsPlaceholder);
           break;
         }
@@ -3172,6 +3180,20 @@ void CWriter::Write(const ExprList& exprs) {
 
         assert(type_stack_.size() >= num_params);
 
+        bool is_import = IsImport(func.name);
+
+        if (is_varargs && !is_import) {
+          Write("struct ", OpenBrace());
+          for (Index i = 0; i < num_vparams; ++i) {
+            Write(varargs_types_[i], " ", VaTempVar(i), ";", Newline());
+          }
+          Write(CloseBrace(), " ", kSymbolPrefix, "va_struct = ", OpenBrace());
+          for (Index i = 0; i < num_vparams; ++i) {
+            Write(VaTempVar(i), ",", Newline());
+          }
+          Write(CloseBrace(), ";", Newline());
+        }
+
         if (num_results > 1) {
           Write(OpenBrace());
           Write("struct ", MangleMultivalueTypes(func.decl.sig.result_types));
@@ -3181,8 +3203,8 @@ void CWriter::Write(const ExprList& exprs) {
         }
 
         Write(ExternalRef(ModuleFieldType::Func, var.name()), "(");
+
         if (options_.features.sandbox_enabled()) {
-          bool is_import = import_module_sym_map_.count(func.name) != 0;
           if (is_import) {
             Write("instance->", GlobalName(ModuleFieldType::Import,
                                            import_module_sym_map_[func.name]));
@@ -3202,13 +3224,22 @@ void CWriter::Write(const ExprList& exprs) {
         }
 
         // Write variable portion of argument list.
-        for (Index i = 0; i < num_vparams; ++i) {
-          if (needs_comma) {
-            Write(", ");
+        if (is_varargs) {
+          if (is_import) {
+            for (Index i = 0; i < num_vparams; ++i) {
+              if (needs_comma) {
+                Write(", ");
+              } else {
+                needs_comma = true;
+              }
+              Write(VaTempVar(i));
+            }
           } else {
-            needs_comma = true;
+            if (needs_comma) {
+              Write(", ");
+            }
+            Write("&", kSymbolPrefix, "va_struct");
           }
-          Write(VaTempVar(i));
         }
 
         // Close the argument list and finish the call.
