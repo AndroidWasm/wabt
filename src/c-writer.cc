@@ -212,10 +212,6 @@ class CWriter {
   void PushTypes(const TypeVector&);
   void DropTypes(size_t count);
 
-  void PrepareVarargs(Index count);
-  bool IsVarargs() const;
-  Index TakeVarargs();
-
   void PushLabel(LabelType,
                  const std::string& name,
                  const FuncSignature&,
@@ -453,9 +449,6 @@ class CWriter {
 
   std::vector<std::string> unique_func_type_names_;
   const Global* stack_pointer_global_ = nullptr;
-
-  bool varargs_prepared_ = false;
-  TypeVector varargs_types_;
 };
 
 // TODO: if WABT begins supporting debug names for labels,
@@ -506,28 +499,6 @@ void CWriter::PushTypes(const TypeVector& types) {
 void CWriter::DropTypes(size_t count) {
   assert(count <= type_stack_.size());
   type_stack_.erase(type_stack_.end() - count, type_stack_.end());
-}
-
-void CWriter::PrepareVarargs(Index count) {
-  assert(!varargs_prepared_);
-  assert(varargs_types_.empty());
-  varargs_prepared_ = true;
-  for (Index i = 0; i < count; ++i) {
-    varargs_types_.push_back(StackType(count - i - 1));
-  }
-  DropTypes(count);
-}
-
-bool CWriter::IsVarargs() const {
-  return varargs_prepared_;
-}
-
-Index CWriter::TakeVarargs() {
-  assert(varargs_prepared_);
-  Index l = varargs_types_.size();
-  varargs_prepared_ = false;
-  varargs_types_.clear();
-  return l;
 }
 
 static bool isVarargsAllocatorFun(const std::string& s) {
@@ -3111,6 +3082,16 @@ void CWriter::WriteTryDelegate(const TryExpr& tryexpr) {
 }
 
 void CWriter::Write(const ExprList& exprs) {
+
+  // Keep varargs state in va_prepared and va_types.
+  // va_prepared == true indicates that the variable
+  // portion of an argument list has been placed into
+  // VaTempVar(0)..VaTempVar(n-1) temporaries, where
+  // va_types[i] is the type of VaTempVar(i) and where
+  // n == va_types.size().
+  bool va_prepared = false;
+  TypeVector va_types;
+
   for (const Expr& expr : exprs) {
     switch (expr.type()) {
       case ExprType::Binary:
@@ -3156,36 +3137,55 @@ void CWriter::Write(const ExprList& exprs) {
         Index num_results = func.GetNumResults();
 
         if (isVarargsAllocatorFun(var.name())) {
+          // This is a call to an intrisic that prepares the
+          // variable portion of the argument list of a subsequent
+          // call of a varargs function (i.e., one declared using
+          // "..." in C/C++).
           assert(num_results == 1);
+          assert(!va_prepared);
+          // Enter new scope and locally declare the VaTempVar(i) temporaries:
           Write(OpenBrace());
           for (Index i = 0; i < num_params; ++i) {
-            Write(StackType(num_params - i - 1), " ",
-                  VaTempVar(i), " = ",
-                  StackVar(num_params - i - 1),
+            Type t = StackType(num_params - i - 1);
+            va_types.push_back(t);
+            Write(t, " ", VaTempVar(i), " = ", StackVar(num_params - i - 1),
                   ";", Newline());
           }
-          PrepareVarargs(num_params);
+          DropTypes(num_params);
+          // Put a placeholder onto the type stack to keep the WASM
+          // stack logic intact.
           PushType(Type::VarargsPlaceholder);
+          va_prepared = true;
+          // Don't do anything else for this kind of call.
           break;
         }
 
+        // Check to see whether the call is to a varargs function,
+        // indicated by the fact that varargs have previously been
+        // prepared:
         Index num_vparams = 0;
-        bool is_varargs = IsVarargs();
-        if (is_varargs) {
-          num_vparams = TakeVarargs();
+        if (va_prepared) {
+          assert(num_params >= 1);;
           num_params -= 1;
+          num_vparams = va_types.size();
           assert(StackType(0) == Type::VarargsPlaceholder);
-          DropTypes(1);
+          DropTypes(1);  // Remove the placeholder.
         }
 
         assert(type_stack_.size() >= num_params);
 
         bool is_import = IsImport(func.name);
 
-        if (is_varargs && !is_import) {
+        if (va_prepared && !is_import) {
+          // We are calling a varargs function that is not imported, so it uses
+          // WASM calling conventions.  This means we must place the variable
+          // portion of the argument list on the stack and pass a pointer to
+          // that stack region as a single extra argument.
+          // The struct, named w2c_va_struct, is defined and initialized locally
+          // within the scope previously opened when varargs were prepared:
           Write("struct ", OpenBrace());
           for (Index i = 0; i < num_vparams; ++i) {
-            Write(varargs_types_[i], " ", VaTempVar(i), ";", Newline());
+            Write(va_types[i], " ", VaTempVar(i), ";", Newline());
           }
           Write(CloseBrace(), " ", kSymbolPrefix, "va_struct = ", OpenBrace());
           for (Index i = 0; i < num_vparams; ++i) {
@@ -3194,6 +3194,7 @@ void CWriter::Write(const ExprList& exprs) {
           Write(CloseBrace(), ";", Newline());
         }
 
+        // Handle multi-result WASM functions:
         if (num_results > 1) {
           Write(OpenBrace());
           Write("struct ", MangleMultivalueTypes(func.decl.sig.result_types));
@@ -3214,6 +3215,8 @@ void CWriter::Write(const ExprList& exprs) {
         }
  
         bool needs_comma = options_.features.sandbox_enabled();
+
+        // Write fixed portion of the argument list:
         for (Index i = 0; i < num_params; ++i) {
           if (needs_comma) {
             Write(", ");
@@ -3223,9 +3226,11 @@ void CWriter::Write(const ExprList& exprs) {
           Write(StackVar(num_params - i - 1));
         }
 
-        // Write variable portion of argument list.
-        if (is_varargs) {
+        // Write variable portion of argument list:
+        if (va_prepared) {
           if (is_import) {
+            // For imported functions use native conventions, which means
+            // splicing in the values from the saved VaTempVar(i) variables:
             for (Index i = 0; i < num_vparams; ++i) {
               if (needs_comma) {
                 Write(", ");
@@ -3235,10 +3240,12 @@ void CWriter::Write(const ExprList& exprs) {
               Write(VaTempVar(i));
             }
           } else {
+            // For WASM-defined varargs functions, pass the address of
+            // the stack-allocated argument region as the single extra argument:
             if (needs_comma) {
               Write(", ");
             }
-            Write("&", kSymbolPrefix, "va_struct");
+            Write("(u64)&", kSymbolPrefix, "va_struct");
           }
         }
 
@@ -3259,9 +3266,11 @@ void CWriter::Write(const ExprList& exprs) {
           PushTypes(func.decl.sig.result_types);
         }
 
-        // Leave scope of varargs temp
-        if (is_varargs) {
+        // Leave the varargs scope:
+        if (va_prepared) {
           Write(CloseBrace(), Newline());
+          va_prepared = false;
+          va_types.clear();
         }
        break;
       }
@@ -3270,8 +3279,6 @@ void CWriter::Write(const ExprList& exprs) {
         const FuncDeclaration& decl = cast<CallIndirectExpr>(&expr)->decl;
         Index num_params = decl.GetNumParams();
         Index num_results = decl.GetNumResults();
-
-        bool is_varargs = IsVarargs();
         
         assert(type_stack_.size() > num_params);
         if (num_results > 1) {
@@ -3285,7 +3292,7 @@ void CWriter::Write(const ExprList& exprs) {
         bool needs_comma = false;
         if (!options_.features.sandbox_enabled()) {
           Write("((");
-          WriteCallIndirectFuncDeclaration(decl, "(*)", is_varargs);
+          WriteCallIndirectFuncDeclaration(decl, "(*)", va_prepared);
           Write(")", StackVar(0), ")(");
         } else {
           const Table* table =
@@ -3304,15 +3311,19 @@ void CWriter::Write(const ExprList& exprs) {
         }
         DropTypes(1);
 
+        // Check to see whether the call is to a varargs function,
+        // indicated by the fact that varargs have previously been
+        // prepared:
         Index num_vparams = 0;
-        if (is_varargs) {
-          assert(num_params > 1);
+        if (va_prepared) {
+          assert(num_params >= 1);
           num_params -= 1;
-          num_vparams = TakeVarargs();
+          num_vparams = va_types.size();
           assert(StackType(0) == Type::VarargsPlaceholder);
           DropTypes(1);
         }
 
+        // Write the fixed portion of the argument list:
         for (Index i = 0; i < num_params; ++i) {
           if (needs_comma) {
             Write(", ");
@@ -3321,6 +3332,9 @@ void CWriter::Write(const ExprList& exprs) {
           }
           Write(StackVar(num_params - i - 1));
         }
+
+        // Write the variable portion of the argument list (if any).
+        // Indirect calls always assume native calling conventions.
         for (Index i = 0; i < num_vparams; ++i) {
           if (needs_comma) {
             Write(", ");
@@ -3329,6 +3343,7 @@ void CWriter::Write(const ExprList& exprs) {
           }
           Write(VaTempVar(i));
         }
+
         Write(");", Newline());
         DropTypes(num_params);
         if (num_results > 1) {
@@ -3343,8 +3358,12 @@ void CWriter::Write(const ExprList& exprs) {
         } else {
           PushTypes(decl.sig.result_types);
         }
-        if (is_varargs) {
+
+        // Leave the varargs scope:
+        if (va_prepared) {
           Write(CloseBrace(), Newline());
+          va_prepared = false;
+          va_types.clear();
         }
         break;
       }
