@@ -2814,7 +2814,7 @@ void CWriter::WriteParamTypes(const FuncDeclaration& decl, bool is_varargs) {
       } else {
         needs_comma = true;
       }
-      if (is_varargs && i == decl.GetNumParams() - 1) {
+      if (is_varargs && (i == decl.GetNumParams() - 1)) {
         Write("...");
       } else {
         Write(decl.GetParamType(i));
