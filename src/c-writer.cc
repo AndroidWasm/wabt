@@ -32,6 +32,7 @@
 #include "wabt/string-util.h"
 
 #define WASM_SPECIAL_PREFIX "wasm_"
+#define WASM_ALLOCATE_VARARGS "__wasm_allocate_varargs"
 #define INTERNAL_MAIN_NAME "__main_argc_argv"
 
 #define INDENT_SIZE 2
@@ -129,6 +130,11 @@ struct StackVar {
       : index(index), type(type) {}
   Index index;
   Type type;
+};
+
+struct VaTempVar {
+  explicit VaTempVar(Index index) : index(index) {}
+  Index index;
 };
 
 struct TypeEnum {
@@ -293,6 +299,7 @@ class CWriter {
   void Write(const LabelDecl&);
   void Write(const GlobalInstanceVar&);
   void Write(const StackVar&);
+  void Write(const VaTempVar&);
   void Write(const ResultType&);
   void Write(const Const&);
   void WriteInitExpr(const ExprList&);
@@ -312,9 +319,11 @@ class CWriter {
   void WriteFuncDeclaration(const FuncDeclaration&, const std::string&);
   void WriteImportFuncDeclaration(const FuncDeclaration&,
                                   const std::string& module_name,
-                                  const std::string& name);
+                                  const std::string& name,
+                                  bool is_varargs = false);
   void WriteCallIndirectFuncDeclaration(const FuncDeclaration&,
-                                        const std::string&);
+                                        const std::string&,
+                                        bool is_varargs = false);
   void WriteModuleInstance();
   void WriteGlobals();
   void WriteStackPointerGlobal(const Global& global);
@@ -351,7 +360,7 @@ class CWriter {
   void WriteParamsAndLocals();
   void WriteParams(const std::vector<std::string>& index_to_name);
   void WriteParamSymbols(const std::vector<std::string>& index_to_name);
-  void WriteParamTypes(const FuncDeclaration& decl);
+  void WriteParamTypes(const FuncDeclaration& decl, bool is_varargs = false);
   void WriteLocals(const std::vector<std::string>& index_to_name);
   void WriteStackVarDeclarations();
   void Write(const ExprList&);
@@ -406,6 +415,8 @@ class CWriter {
 
   void PushFuncSection(std::string_view include_condition = "");
 
+  bool IsImport(const std::string& name) const;
+
   const WriteCOptions& options_;
   const Module* module_ = nullptr;
   const Func* func_ = nullptr;
@@ -424,7 +435,6 @@ class CWriter {
   StackVarSymbolMap stack_var_sym_map_;
   SymbolSet global_syms_;
   SymbolSet local_syms_;
-  SymbolSet import_syms_;
   TypeVector type_stack_;
   std::vector<Label> label_stack_;
   std::vector<TryCatchLabel> try_catch_stack_;
@@ -489,6 +499,10 @@ void CWriter::PushTypes(const TypeVector& types) {
 void CWriter::DropTypes(size_t count) {
   assert(count <= type_stack_.size());
   type_stack_.erase(type_stack_.end() - count, type_stack_.end());
+}
+
+static bool isVarargsAllocatorFun(const std::string& s) {
+  return s.rfind(WASM_ALLOCATE_VARARGS, 1) < 2; // tolerate $ at index 0
 }
 
 void CWriter::PushLabel(LabelType label_type,
@@ -831,7 +845,6 @@ void CWriter::DefineImportName(const Import* import,
       break;
   }
 
-  import_syms_.insert(name);
   import_module_sym_map_.emplace(name, import->module_name);
 
   std::string mangled;
@@ -1003,24 +1016,21 @@ void CWriter::Write(const GlobalName& name) {
 }
 
 void CWriter::Write(const ExternalPtr& name) {
-  bool is_import = import_syms_.count(name.name) != 0;
-  if (!is_import || !options_.features.sandbox_enabled()) {
+  if (!IsImport(name.name) || !options_.features.sandbox_enabled()) {
     Write("&");
   }
   Write(GlobalName(name));
 }
 
 void CWriter::Write(const ExternalInstancePtr& name) {
-  bool is_import = import_syms_.count(name.name) != 0;
-  if (!is_import) {
+  if (!IsImport(name.name)) {
     Write("&");
   }
   Write("instance->", GlobalName(name));
 }
 
 void CWriter::Write(const ExternalRef& name) {
-  bool is_import = import_syms_.count(name.name) != 0;
-  if (is_import && options_.features.sandbox_enabled()) {
+  if (IsImport(name.name) && options_.features.sandbox_enabled()) {
     Write("(*", GlobalName(name), ")");
   } else {
     Write(GlobalName(name));
@@ -1028,8 +1038,7 @@ void CWriter::Write(const ExternalRef& name) {
 }
 
 void CWriter::Write(const ExternalInstanceRef& name) {
-  bool is_import = import_syms_.count(name.name) != 0;
-  if (is_import) {
+  if (IsImport(name.name)) {
     Write("(*instance->", GlobalName(name), ")");
   } else {
     Write("instance->", GlobalName(name));
@@ -1097,6 +1106,10 @@ void CWriter::Write(const StackVar& sv) {
   } else {
     Write(iter->second);
   }
+}
+
+void CWriter::Write(const VaTempVar& v) {
+  Write(kSymbolPrefix, "va_", std::to_string(v.index));
 }
 
 void CWriter::Write(Type type) {
@@ -1266,7 +1279,7 @@ void CWriter::WriteInitExpr(const ExprList& expr_list) {
             "(wasm_rt_function_ptr_t)",
             ExternalPtr(ModuleFieldType::Func, func->name), ", ");
 
-      bool is_import = import_module_sym_map_.count(func->name) != 0;
+      bool is_import = IsImport(func->name);
       if (is_import) {
         Write("instance->", GlobalName(ModuleFieldType::Import,
                                        import_module_sym_map_[func->name]));
@@ -1619,18 +1632,31 @@ void CWriter::WriteImportsNoSandbox() {
 
   Write(Newline());
 
+  std::unordered_set<std::string> varargs_functions;
+  for (const Import* import : unique_imports_) {
+    if (import->kind() == ExternalKind::Func && isVarargsAllocatorFun(import->field_name)) {
+      size_t percent_pos = import->field_name.rfind('%');
+      if (percent_pos != std::string::npos) {
+        varargs_functions.insert(import->field_name.substr(percent_pos + 1));
+      }
+    }
+  }
+
   for (const Import* import : unique_imports_) {
     if (import->kind() == ExternalKind::Func) {
-      if (import->field_name.rfind(WASM_SPECIAL_PREFIX, 0) != 0) {
+      if (import->field_name.rfind(WASM_SPECIAL_PREFIX, 0) != 0 &&
+          !isVarargsAllocatorFun(import->field_name)) {
+        const Func& func = cast<FuncImport>(import)->func;
         Write("/* import: '", import->module_name, "' '", import->field_name,
               "' */", Newline());
-        const Func& func = cast<FuncImport>(import)->func;
         // TODO: this logic needs work - we don't expect anything but
         // kEnvModuleName in no-sandbox mode.
         if (import->module_name == kEnvModuleName) {
           if (!isExcludedNoSandboxImport(import->field_name)) {
             WriteImportFuncDeclaration(func.decl, import->module_name,
-                                       import->field_name);
+                                       import->field_name,
+                                       varargs_functions.find(import->field_name) !=
+                                         varargs_functions.end());
           }
         } else {
           WriteImportFuncDeclaration(
@@ -1707,22 +1733,24 @@ void CWriter::WriteFuncDeclaration(const FuncDeclaration& decl,
 
 void CWriter::WriteImportFuncDeclaration(const FuncDeclaration& decl,
                                          const std::string& module_name,
-                                         const std::string& name) {
+                                         const std::string& name,
+                                         bool is_varargs) {
   Write(ResultType(decl.sig.result_types), " ", name, "(");
   if (options_.features.sandbox_enabled()) {
     Write("struct ", ModuleInstanceTypeName(module_name), "*");
   }
-  WriteParamTypes(decl);
+  WriteParamTypes(decl, is_varargs);
   Write(")");
 }
 
 void CWriter::WriteCallIndirectFuncDeclaration(const FuncDeclaration& decl,
-                                               const std::string& name) {
+                                               const std::string& name,
+                                               bool is_varargs) {
   Write(ResultType(decl.sig.result_types), " ", name, "(");
   if (options_.features.sandbox_enabled()) {
     Write("void*");
   }
-  WriteParamTypes(decl);
+  WriteParamTypes(decl, is_varargs);
   Write(")");
 }
 
@@ -2177,7 +2205,7 @@ void CWriter::WriteElemInitializers() {
           const FuncType* func_type = module_->GetFuncType(func->decl.type_var);
           Write("{", FuncTypeExpr(func_type), ", (wasm_rt_function_ptr_t)",
                 ExternalPtr(ModuleFieldType::Func, func->name), ", ");
-          const bool is_import = import_module_sym_map_.count(func->name) != 0;
+          const bool is_import = IsImport(func->name);
           if (is_import) {
             Write("offsetof(", ModuleInstanceTypeName(), ", ",
                   GlobalName(ModuleFieldType::Import,
@@ -2378,7 +2406,7 @@ void CWriter::WriteExports(CWriterPhase kind) {
         Write("return ", ExternalRef(ModuleFieldType::Func, internal_name),
               "(");
         if (options_.features.sandbox_enabled()) {
-          bool is_import = import_module_sym_map_.count(internal_name) != 0;
+          bool is_import = IsImport(internal_name);;
           if (is_import) {
             Write("instance->",
                   GlobalName(ModuleFieldType::Import,
@@ -2479,8 +2507,7 @@ void CWriter::WriteInit() {
 
   for (Var* var : module_->starts) {
     Write(ExternalRef(ModuleFieldType::Func, module_->GetFunc(*var)->name));
-    bool is_import =
-        import_module_sym_map_.count(module_->GetFunc(*var)->name) != 0;
+    bool is_import = IsImport(module_->GetFunc(*var)->name);
     if (is_import) {
       Write("(instance->",
             GlobalName(ModuleFieldType::Import,
@@ -2662,6 +2689,10 @@ void CWriter::PushFuncSection(std::string_view include_condition) {
   stream_ = &func_sections_.back().second;
 }
 
+bool CWriter::IsImport(const std::string& name) const {
+  return import_module_sym_map_.find(name) != import_module_sym_map_.end();
+}
+
 void CWriter::Write(const Func& func) {
   func_ = &func;
   // Copy symbols from global symbol table so we don't shadow them.
@@ -2774,7 +2805,7 @@ void CWriter::WriteParamSymbols(const std::vector<std::string>& index_to_name) {
   Write(");", Newline());
 }
 
-void CWriter::WriteParamTypes(const FuncDeclaration& decl) {
+void CWriter::WriteParamTypes(const FuncDeclaration& decl, bool is_varargs) {
   bool needs_comma = options_.features.sandbox_enabled();
   if (decl.GetNumParams() != 0) {
     for (Index i = 0; i < decl.GetNumParams(); ++i) {
@@ -2783,7 +2814,11 @@ void CWriter::WriteParamTypes(const FuncDeclaration& decl) {
       } else {
         needs_comma = true;
       }
-      Write(decl.GetParamType(i));
+      if (is_varargs && (i == decl.GetNumParams() - 1)) {
+        Write("...");
+      } else {
+        Write(decl.GetParamType(i));
+      }
     }
   }
 }
@@ -3047,6 +3082,16 @@ void CWriter::WriteTryDelegate(const TryExpr& tryexpr) {
 }
 
 void CWriter::Write(const ExprList& exprs) {
+
+  // Keep varargs state in va_prepared and va_types.
+  // va_prepared == true indicates that the variable
+  // portion of an argument list has been placed into
+  // VaTempVar(0)..VaTempVar(n-1) temporaries, where
+  // va_types[i] is the type of VaTempVar(i) and where
+  // n == va_types.size().
+  bool va_prepared = false;
+  TypeVector va_types;
+
   for (const Expr& expr : exprs) {
     switch (expr.type()) {
       case ExprType::Binary:
@@ -3085,10 +3130,75 @@ void CWriter::Write(const ExprList& exprs) {
 
       case ExprType::Call: {
         const Var& var = cast<CallExpr>(&expr)->var;
+        assert(var.is_name());
+
         const Func& func = *module_->GetFunc(var);
         Index num_params = func.GetNumParams();
         Index num_results = func.GetNumResults();
+
+        if (isVarargsAllocatorFun(var.name())) {
+          // This is a call to an intrisic that prepares the
+          // variable portion of the argument list of a subsequent
+          // call of a varargs function (i.e., one declared using
+          // "..." in C/C++).
+          assert(num_results == 1);
+          assert(!va_prepared);
+          // Enter new scope and locally declare the VaTempVar(i) temporaries:
+          Write(OpenBrace());
+          for (Index i = 0; i < num_params; ++i) {
+            Type t = StackType(num_params - i - 1);
+            va_types.push_back(t);
+            Write(t, " ", VaTempVar(i), " = ", StackVar(num_params - i - 1),
+                  ";", Newline());
+          }
+          DropTypes(num_params);
+          // Put a placeholder onto the type stack to keep the WASM
+          // stack logic intact.
+          PushType(Type::VarargsPlaceholder);
+          va_prepared = true;
+          // Don't do anything else for this kind of call.
+          break;
+        }
+
+        // Check to see whether the call is to a varargs function,
+        // indicated by the fact that varargs have previously been
+        // prepared:
+        Index num_vparams = 0;
+        if (va_prepared) {
+          assert(num_params >= 1);
+          num_vparams = va_types.size();
+          assert(StackType(0) == Type::VarargsPlaceholder);
+          // The last parameter of this call has no manifestation
+          // and merely represents the variable portion of the
+          // argument list.  It is removed here and later
+          // replaced with that variable portion.
+          DropTypes(1);
+          num_params -= 1;
+         }
+
         assert(type_stack_.size() >= num_params);
+
+        bool is_import = IsImport(func.name);
+
+        if (va_prepared && !is_import) {
+          // We are calling a varargs function that is not imported, so it uses
+          // WASM calling conventions.  This means we must place the variable
+          // portion of the argument list on the stack and pass a pointer to
+          // that stack region as a single extra argument representing all of them.
+          // The struct, named w2c_va_struct, is defined and initialized locally
+          // within the scope previously opened when varargs were prepared:
+          Write("struct ", OpenBrace());
+          for (Index i = 0; i < num_vparams; ++i) {
+            Write(va_types[i], " ", VaTempVar(i), ";", Newline());
+          }
+          Write(CloseBrace(), " ", kSymbolPrefix, "va_struct = ", OpenBrace());
+          for (Index i = 0; i < num_vparams; ++i) {
+            Write(VaTempVar(i), ",", Newline());
+          }
+          Write(CloseBrace(), ";", Newline());
+        }
+
+        // Handle multi-result WASM functions:
         if (num_results > 1) {
           Write(OpenBrace());
           Write("struct ", MangleMultivalueTypes(func.decl.sig.result_types));
@@ -3097,10 +3207,9 @@ void CWriter::Write(const ExprList& exprs) {
           Write(StackVar(num_params - 1, func.GetResultType(0)), " = ");
         }
 
-        assert(var.is_name());
         Write(ExternalRef(ModuleFieldType::Func, var.name()), "(");
+
         if (options_.features.sandbox_enabled()) {
-          bool is_import = import_module_sym_map_.count(func.name) != 0;
           if (is_import) {
             Write("instance->", GlobalName(ModuleFieldType::Import,
                                            import_module_sym_map_[func.name]));
@@ -3108,8 +3217,10 @@ void CWriter::Write(const ExprList& exprs) {
             Write("instance");
           }
         }
-
+ 
         bool needs_comma = options_.features.sandbox_enabled();
+
+        // Write fixed portion of the argument list:
         for (Index i = 0; i < num_params; ++i) {
           if (needs_comma) {
             Write(", ");
@@ -3118,7 +3229,33 @@ void CWriter::Write(const ExprList& exprs) {
           }
           Write(StackVar(num_params - i - 1));
         }
+
+        // Write variable portion of argument list:
+        if (va_prepared) {
+          if (is_import) {
+            // For imported functions use native conventions, which means
+            // splicing in the values from the saved VaTempVar(i) variables:
+            for (Index i = 0; i < num_vparams; ++i) {
+              if (needs_comma) {
+                Write(", ");
+              } else {
+                needs_comma = true;
+              }
+              Write(VaTempVar(i));
+            }
+          } else {
+            // For WASM-defined varargs functions, pass the address of
+            // the stack-allocated argument region as the single extra argument:
+            if (needs_comma) {
+              Write(", ");
+            }
+            Write("(u64)&", kSymbolPrefix, "va_struct");
+          }
+        }
+
+        // Close the argument list and finish the call.
         Write(");", Newline());
+ 
         DropTypes(num_params);
         if (num_results > 1) {
           for (Index i = 0; i < num_results; ++i) {
@@ -3132,13 +3269,21 @@ void CWriter::Write(const ExprList& exprs) {
         } else {
           PushTypes(func.decl.sig.result_types);
         }
-        break;
+
+        // Leave the varargs scope:
+        if (va_prepared) {
+          Write(CloseBrace(), Newline());
+          va_prepared = false;
+          va_types.clear();
+        }
+       break;
       }
 
       case ExprType::CallIndirect: {
         const FuncDeclaration& decl = cast<CallIndirectExpr>(&expr)->decl;
         Index num_params = decl.GetNumParams();
         Index num_results = decl.GetNumResults();
+        
         assert(type_stack_.size() > num_params);
         if (num_results > 1) {
           Write(OpenBrace());
@@ -3151,7 +3296,7 @@ void CWriter::Write(const ExprList& exprs) {
         bool needs_comma = false;
         if (!options_.features.sandbox_enabled()) {
           Write("((");
-          WriteCallIndirectFuncDeclaration(decl, "(*)");
+          WriteCallIndirectFuncDeclaration(decl, "(*)", va_prepared);
           Write(")", StackVar(0), ")(");
         } else {
           const Table* table =
@@ -3168,16 +3313,47 @@ void CWriter::Write(const ExprList& exprs) {
                 ".data[", StackVar(0), "].module_instance");
           needs_comma = true;
         }
+        DropTypes(1);
+
+        // Check to see whether the call is to a varargs function,
+        // indicated by the fact that varargs have previously been
+        // prepared:
+        Index num_vparams = 0;
+        if (va_prepared) {
+          assert(num_params >= 1);
+          num_vparams = va_types.size();
+          assert(StackType(0) == Type::VarargsPlaceholder);
+          // The last parameter of this call has no manifestation
+          // and merely represents the variable portion of the
+          // argument list.  It is removed here and later
+          // replaced with that variable portion.
+          DropTypes(1);
+          num_params -= 1;
+        }
+
+        // Write the fixed portion of the argument list:
         for (Index i = 0; i < num_params; ++i) {
           if (needs_comma) {
             Write(", ");
           } else {
             needs_comma = true;
           }
-          Write(StackVar(num_params - i));
+          Write(StackVar(num_params - i - 1));
         }
+
+        // Write the variable portion of the argument list (if any).
+        // Indirect calls always assume native calling conventions.
+        for (Index i = 0; i < num_vparams; ++i) {
+          if (needs_comma) {
+            Write(", ");
+          } else {
+            needs_comma = true;
+          }
+          Write(VaTempVar(i));
+        }
+
         Write(");", Newline());
-        DropTypes(num_params + 1);
+        DropTypes(num_params);
         if (num_results > 1) {
           for (Index i = 0; i < num_results; ++i) {
             Type type = decl.GetResultType(i);
@@ -3189,6 +3365,13 @@ void CWriter::Write(const ExprList& exprs) {
           Write(CloseBrace(), Newline());
         } else {
           PushTypes(decl.sig.result_types);
+        }
+
+        // Leave the varargs scope:
+        if (va_prepared) {
+          Write(CloseBrace(), Newline());
+          va_prepared = false;
+          va_types.clear();
         }
         break;
       }
