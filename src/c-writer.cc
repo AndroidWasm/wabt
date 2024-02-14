@@ -3165,12 +3165,16 @@ void CWriter::Write(const ExprList& exprs) {
         // prepared:
         Index num_vparams = 0;
         if (va_prepared) {
-          assert(num_params >= 1);;
-          num_params -= 1;
+          assert(num_params >= 1);
           num_vparams = va_types.size();
           assert(StackType(0) == Type::VarargsPlaceholder);
-          DropTypes(1);  // Remove the placeholder.
-        }
+          // The last parameter of this call has no manifestation
+          // and merely represents the variable portion of the
+          // argument list.  It is removed here and later
+          // replaced with that variable portion.
+          DropTypes(1);
+          num_params -= 1;
+         }
 
         assert(type_stack_.size() >= num_params);
 
@@ -3180,7 +3184,7 @@ void CWriter::Write(const ExprList& exprs) {
           // We are calling a varargs function that is not imported, so it uses
           // WASM calling conventions.  This means we must place the variable
           // portion of the argument list on the stack and pass a pointer to
-          // that stack region as a single extra argument.
+          // that stack region as a single extra argument representing all of them.
           // The struct, named w2c_va_struct, is defined and initialized locally
           // within the scope previously opened when varargs were prepared:
           Write("struct ", OpenBrace());
@@ -3317,10 +3321,14 @@ void CWriter::Write(const ExprList& exprs) {
         Index num_vparams = 0;
         if (va_prepared) {
           assert(num_params >= 1);
-          num_params -= 1;
           num_vparams = va_types.size();
           assert(StackType(0) == Type::VarargsPlaceholder);
+          // The last parameter of this call has no manifestation
+          // and merely represents the variable portion of the
+          // argument list.  It is removed here and later
+          // replaced with that variable portion.
           DropTypes(1);
+          num_params -= 1;
         }
 
         // Write the fixed portion of the argument list:
