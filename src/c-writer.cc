@@ -1834,8 +1834,10 @@ void CWriter::WriteMemory(const std::string& name) {
 }
 
 void CWriter::WriteMemoryPtr(const std::string& name) {
-  Write("wasm_rt_memory_t* ", name, "(", ModuleInstanceTypeName(),
-        "* instance)");
+  if (options_.features.sandbox_enabled()) {
+    Write("wasm_rt_memory_t* ", name, "(", ModuleInstanceTypeName(),
+          "* instance)");
+  }
 }
 
 void CWriter::WriteTables() {
@@ -2323,24 +2325,25 @@ void CWriter::WriteExports(CWriterPhase kind) {
       continue;
     }
 
-    Write(Newline(), "/* export: '", SanitizeForComment(export_->name), "' */",
-          Newline());
-
     const std::string mangled_name = ExportName(export_->name);
-    if (!options_.features.sandbox_enabled() &&
-        kind == CWriterPhase::Declarations) {
-      // In no-sandbox mode the mangled name is consistently replaced with the
-      // "real" export name, i.e., the name that linked code expects.  Since
-      // some usages (especially in tests) still refer to the mangled name, we
-      // implement this replacement via #define, making the mangled name
-      // internally an alias of the real name.
-      Write("#define ", mangled_name, " ", export_->name, Newline());
-    }
+
     std::string internal_name;
     std::vector<std::string> index_to_name;
 
     switch (export_->kind) {
       case ExternalKind::Func: {
+        Write(Newline(), "/* export: '", SanitizeForComment(export_->name),
+              "' */", Newline());
+         if (!options_.features.sandbox_enabled() &&
+            kind == CWriterPhase::Declarations) {
+          // In no-sandbox mode the mangled name is consistently replaced with
+          // the "real" export name, i.e., the name that linked code expects.
+          // Since some usages (especially in tests) still refer to the mangled
+          // name, we implement this replacement via #define, making the mangled
+          // name internally an alias of the real name.
+          Write("#define ", mangled_name, " ", export_->name, Newline());
+        }
+
         const Func* func = module_->GetFunc(export_->var);
         internal_name = func->name;
         if (kind == CWriterPhase::Declarations) {
@@ -2360,33 +2363,41 @@ void CWriter::WriteExports(CWriterPhase kind) {
       }
 
       case ExternalKind::Global: {
-        const Global* global = module_->GetGlobal(export_->var);
-        internal_name = global->name;
-        WriteGlobalPtr(*global, mangled_name);
+        if (options_.features.sandbox_enabled()) {
+          const Global* global = module_->GetGlobal(export_->var);
+          internal_name = global->name;
+          WriteGlobalPtr(*global, mangled_name);
+        }
         break;
       }
 
       case ExternalKind::Memory: {
-        const Memory* memory = module_->GetMemory(export_->var);
-        internal_name = memory->name;
-        WriteMemoryPtr(mangled_name);
+        if (options_.features.sandbox_enabled()) {
+          const Memory* memory = module_->GetMemory(export_->var);
+          internal_name = memory->name;
+          WriteMemoryPtr(mangled_name);
+        }
         break;
       }
 
       case ExternalKind::Table: {
-        const Table* table = module_->GetTable(export_->var);
-        internal_name = table->name;
-        WriteTablePtr(mangled_name, *table);
+        if (options_.features.sandbox_enabled()) {
+          const Table* table = module_->GetTable(export_->var);
+          internal_name = table->name;
+          WriteTablePtr(mangled_name, *table);
+        }
         break;
       }
 
       case ExternalKind::Tag: {
-        const Tag* tag = module_->GetTag(export_->var);
-        internal_name = tag->name;
-        if (kind == CWriterPhase::Declarations) {
-          Write("extern ");
+        if (options_.features.sandbox_enabled()) {
+          const Tag* tag = module_->GetTag(export_->var);
+          internal_name = tag->name;
+          if (kind == CWriterPhase::Declarations) {
+            Write("extern ");
+          }
+          Write("const wasm_rt_tag_t ", mangled_name);
         }
-        Write("const wasm_rt_tag_t ", mangled_name);
         break;
       }
 
@@ -2395,7 +2406,9 @@ void CWriter::WriteExports(CWriterPhase kind) {
     }
 
     if (kind == CWriterPhase::Declarations) {
-      Write(";", Newline());
+      if (options_.features.sandbox_enabled() || export_->kind == ExternalKind::Func) {
+        Write(";", Newline());
+      }
       continue;
     }
 
@@ -2433,32 +2446,40 @@ void CWriter::WriteExports(CWriterPhase kind) {
       }
 
       case ExternalKind::Global:
-        Write(OpenBrace());
-        Write("return ",
-              ExternalInstancePtr(ModuleFieldType::Global, internal_name), ";",
-              Newline());
-        Write(CloseBrace(), Newline());
+        if (options_.features.sandbox_enabled()) {
+          Write(OpenBrace());
+          Write("return ",
+                ExternalInstancePtr(ModuleFieldType::Global, internal_name), ";",
+                Newline());
+          Write(CloseBrace(), Newline());
+        }
         break;
 
       case ExternalKind::Memory:
-        Write(OpenBrace());
-        Write("return ",
-              ExternalInstancePtr(ModuleFieldType::Memory, internal_name), ";",
-              Newline());
-        Write(CloseBrace(), Newline());
+        if (options_.features.sandbox_enabled()) {
+          Write(OpenBrace());
+          Write("return ",
+                ExternalInstancePtr(ModuleFieldType::Memory, internal_name), ";",
+                Newline());
+          Write(CloseBrace(), Newline());
+        }
         break;
 
       case ExternalKind::Table:
-        Write(OpenBrace());
-        Write("return ",
-              ExternalInstancePtr(ModuleFieldType::Table, internal_name), ";",
-              Newline());
-        Write(CloseBrace(), Newline());
+        if (options_.features.sandbox_enabled()) {
+          Write(OpenBrace());
+          Write("return ",
+                ExternalInstancePtr(ModuleFieldType::Table, internal_name), ";",
+                Newline());
+          Write(CloseBrace(), Newline());
+        }
         break;
 
       case ExternalKind::Tag:
-        Write("= ", ExternalPtr(ModuleFieldType::Tag, internal_name), ";",
-              Newline());
+        if (options_.features.sandbox_enabled()) {
+          Write("= ", ExternalPtr(ModuleFieldType::Tag, internal_name), ";",
+                Newline());
+        }
         break;
 
       default:
