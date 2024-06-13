@@ -17,6 +17,10 @@
 #ifndef WASM_RT_NO_SANDBOX_DECLARATIONS_H_
 #define WASM_RT_NO_SANDBOX_DECLARATIONS_H_
 
+struct w2c_sret_placeholder {
+  char c[128];
+};
+
 #define FUNC_PROLOGUE
 #define FUNC_EPILOGUE
 

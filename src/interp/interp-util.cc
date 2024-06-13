@@ -65,6 +65,7 @@ std::string TypedValueToString(const TypedValue& tv) {
     case Type::I16U:
     case Type::I32U:
     case Type::VarargsPlaceholder:
+    case Type::SRetPointer:
       // These types are not concrete types and should never exist as a value
       WABT_UNREACHABLE;
   }

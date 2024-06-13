@@ -33,6 +33,8 @@
 
 #define WASM_SPECIAL_PREFIX "wasm_"
 #define WASM_ALLOCATE_VARARGS "__wasm_allocate_varargs"
+#define WASM_SRET_ARG "__wasm_sret_arg"
+#define WASM_SRET_ENTRY "__wasm_sret_entry"
 #define INTERNAL_MAIN_NAME "__main_argc_argv"
 
 #define INDENT_SIZE 2
@@ -316,14 +318,16 @@ class CWriter {
   void WriteImportsNoSandbox();
   void WriteImports();
   void WriteFuncDeclarations();
-  void WriteFuncDeclaration(const FuncDeclaration&, const std::string&);
+  void WriteFuncDeclaration(const FuncDeclaration&, const std::string&, bool is_sret = false);
   void WriteImportFuncDeclaration(const FuncDeclaration&,
                                   const std::string& module_name,
                                   const std::string& name,
-                                  bool is_varargs = false);
+                                  bool is_varargs = false,
+                                  bool is_sret = false);
   void WriteCallIndirectFuncDeclaration(const FuncDeclaration&,
                                         const std::string&,
-                                        bool is_varargs = false);
+                                        bool is_varargs = false,
+                                        bool is_sret = false);
   void WriteModuleInstance();
   void WriteGlobals();
   void WriteStackPointerGlobal(const Global& global);
@@ -357,10 +361,10 @@ class CWriter {
   void WriteImportProperties(CWriterPhase);
   void WriteFuncs();
   void Write(const Func&);
-  void WriteParamsAndLocals();
-  void WriteParams(const std::vector<std::string>& index_to_name);
+  void WriteParamsAndLocals(bool use_sret);
+  void WriteParams(const std::vector<std::string>& index_to_name, bool use_sret);
   void WriteParamSymbols(const std::vector<std::string>& index_to_name);
-  void WriteParamTypes(const FuncDeclaration& decl, bool is_varargs = false);
+  void WriteParamTypes(const FuncDeclaration& decl, bool is_varargs = false, bool is_sret = false);
   void WriteLocals(const std::vector<std::string>& index_to_name);
   void WriteStackVarDeclarations();
   void Write(const ExprList&);
@@ -417,6 +421,24 @@ class CWriter {
 
   bool IsImport(const std::string& name) const;
 
+  bool IsVarargsImportedFunction(const std::string& name) const {
+    return
+      !options_.features.sandbox_enabled() &&
+      varargs_imported_functions_.find(name) != varargs_imported_functions_.end();
+  }
+
+  bool IsSRetImportedFunction(const std::string& name) const {
+    return
+      !options_.features.sandbox_enabled() &&
+      sret_imported_functions_.find(name) != sret_imported_functions_.end();
+  }
+
+  bool IsSRetDefinedFunction(const std::string& name) const {
+    return
+      !options_.features.sandbox_enabled() &&
+      sret_defined_functions_.find(name) != sret_defined_functions_.end();
+  }
+
   const WriteCOptions& options_;
   const Module* module_ = nullptr;
   const Func* func_ = nullptr;
@@ -441,6 +463,22 @@ class CWriter {
   std::string module_prefix_;
 
   std::vector<const Import*> unique_imports_;
+
+  // Set of C++ mangled names of functions with a ... argument.
+  // This set is derived from the WASM_ALLOCATE_VARARGS marker.
+  std::unordered_set<std::string> varargs_imported_functions_;
+  // Set of C++ mangled names of functions that return a struct
+  // by value. This set includes all functions (imported or not),
+  // but only the imported ones are relevant.  For defined
+  // functions we don't have easy access to the C++ mangled name,
+  // so they are handled separately using sret_defined_functions_.
+  std::unordered_set<std::string> sret_imported_functions_;
+  // Set of WASM formatted names of defined functions that
+  // return a struct by value.  This set is derived from the
+  // appearance of the WASM_SRET_ENTRY marker within the body
+  // of the respective function.
+  std::unordered_set<std::string> sret_defined_functions_;
+
   SymbolSet import_module_set_;       // modules that are imported from
   SymbolSet import_func_module_set_;  // modules that funcs are imported from
 
@@ -502,7 +540,15 @@ void CWriter::DropTypes(size_t count) {
 }
 
 static bool isVarargsAllocatorFun(const std::string& s) {
-  return s.rfind(WASM_ALLOCATE_VARARGS, 1) < 2; // tolerate $ at index 0
+  return s.rfind(WASM_ALLOCATE_VARARGS, 1) < 2;  // tolerate $ at index 0
+}
+
+static bool isSRetArgMarker(const std::string& s) {
+  return s.rfind(WASM_SRET_ARG, 1) < 2;  // tolerate $ at index 0
+}
+
+static bool isSRetEntryMarker(const std::string& s) {
+  return s.rfind(WASM_SRET_ENTRY, 1) < 2;  // tolerate $ at index 0
 }
 
 void CWriter::PushLabel(LabelType label_type,
@@ -1462,6 +1508,14 @@ bool CWriter::SkipImport(const Import* import) const {
          import->field_name == kStackPointerNameWithoutDollar;
 }
 
+static void insertMarkerName(const std::string& full_name,
+                             std::unordered_set<std::string> *marked_set) {
+  size_t percent_pos = full_name.rfind('%');
+  if (percent_pos != std::string::npos) {
+    marked_set->insert(full_name.substr(percent_pos + 1));
+  }
+}
+
 void CWriter::ComputeUniqueImports() {
   using modname_name_pair = std::pair<std::string, std::string>;
   std::map<modname_name_pair, const Import*> import_map;
@@ -1488,8 +1542,19 @@ void CWriter::ComputeUniqueImports() {
     }
   }
 
+  varargs_imported_functions_.clear();
+  sret_imported_functions_.clear();
   for (const auto& node : import_map) {
-    unique_imports_.push_back(node.second);
+    const Import *import = node.second;
+    unique_imports_.push_back(import);
+    // Populate varargs_functions_ and sret_functions_:
+    if (import->kind() == ExternalKind::Func) {
+      if (isVarargsAllocatorFun(import->field_name)) {
+        insertMarkerName(import->field_name, &varargs_imported_functions_);
+      } else if (isSRetArgMarker(import->field_name)) {
+        insertMarkerName(import->field_name, &sret_imported_functions_);
+      }
+    }
   }
 }
 
@@ -1632,21 +1697,12 @@ void CWriter::WriteImportsNoSandbox() {
 
   Write(Newline());
 
-  std::unordered_set<std::string> varargs_functions;
-  for (const Import* import : unique_imports_) {
-    if (import->kind() == ExternalKind::Func &&
-        isVarargsAllocatorFun(import->field_name)) {
-      size_t percent_pos = import->field_name.rfind('%');
-      if (percent_pos != std::string::npos) {
-        varargs_functions.insert(import->field_name.substr(percent_pos + 1));
-      }
-    }
-  }
-
   for (const Import* import : unique_imports_) {
     if (import->kind() != ExternalKind::Func ||
         import->field_name.rfind(WASM_SPECIAL_PREFIX, 0) == 0 ||
         isVarargsAllocatorFun(import->field_name) ||
+        isSRetArgMarker(import->field_name) ||
+        isSRetEntryMarker(import->field_name) ||
         isExcludedNoSandboxImport(import->field_name)) {
       continue;
     }
@@ -1656,10 +1712,10 @@ void CWriter::WriteImportsNoSandbox() {
     }
     const Func& func = cast<FuncImport>(import)->func;
     Write("/* import: '", import->field_name, "' */", Newline());
-    bool is_varargs =
-        varargs_functions.find(import->field_name) != varargs_functions.end();
+    bool is_varargs = IsVarargsImportedFunction(import->field_name);
+    bool is_sret = IsSRetImportedFunction(import->field_name);
     WriteImportFuncDeclaration(func.decl, import->module_name,
-                               import->field_name, is_varargs);
+                               import->field_name, is_varargs, is_sret);
     Write(";", Newline());
   }
 }
@@ -1702,8 +1758,9 @@ void CWriter::WriteFuncDeclarations() {
     bool is_import = func_index < module_->num_func_imports;
     if (!is_import) {
       Write("static ");
+      bool treat_as_sret = IsSRetDefinedFunction(func->name);
       WriteFuncDeclaration(
-          func->decl, DefineGlobalScopeName(ModuleFieldType::Func, func->name));
+          func->decl, DefineGlobalScopeName(ModuleFieldType::Func, func->name), treat_as_sret);
       Write(";", Newline());
     }
     ++func_index;
@@ -1711,35 +1768,52 @@ void CWriter::WriteFuncDeclarations() {
 }
 
 void CWriter::WriteFuncDeclaration(const FuncDeclaration& decl,
-                                   const std::string& name) {
-  Write(ResultType(decl.sig.result_types), " ", name, "(");
+                                   const std::string& name,
+                                   bool treat_as_sret) {
+  if (treat_as_sret) {
+    Write("struct w2c_sret_placeholder ", name, "(");
+  } else {
+    Write(ResultType(decl.sig.result_types), " ", name, "(");
+  }
   if (options_.features.sandbox_enabled()) {
     Write(ModuleInstanceTypeName(), "*");
   }
-  WriteParamTypes(decl);
+  WriteParamTypes(decl, false, treat_as_sret);
   Write(")");
 }
 
 void CWriter::WriteImportFuncDeclaration(const FuncDeclaration& decl,
                                          const std::string& module_name,
                                          const std::string& name,
-                                         bool is_varargs) {
-  Write(ResultType(decl.sig.result_types), " ", name, "(");
+                                         bool is_varargs,
+                                         bool is_sret) {
+  if (is_sret) {
+    Write("struct w2c_sret_placeholder");
+  } else {
+    Write(ResultType(decl.sig.result_types));
+  }
+  Write(" ", name, "(");
   if (options_.features.sandbox_enabled()) {
     Write("struct ", ModuleInstanceTypeName(module_name), "*");
   }
-  WriteParamTypes(decl, is_varargs);
+  WriteParamTypes(decl, is_varargs, is_sret);
   Write(")");
 }
 
 void CWriter::WriteCallIndirectFuncDeclaration(const FuncDeclaration& decl,
                                                const std::string& name,
-                                               bool is_varargs) {
-  Write(ResultType(decl.sig.result_types), " ", name, "(");
+                                               bool is_varargs,
+                                               bool is_sret) {
+  if (is_sret) {
+    Write("struct w2c_sret_placeholder");
+  } else {
+    Write(ResultType(decl.sig.result_types));
+  }
+  Write(" ", name, "(");
   if (options_.features.sandbox_enabled()) {
     Write("void*");
   }
-  WriteParamTypes(decl, is_varargs);
+  WriteParamTypes(decl, is_varargs, is_sret);
   Write(")");
 }
 
@@ -2346,7 +2420,7 @@ void CWriter::WriteExports(CWriterPhase kind) {
                 "(");
           MakeTypeBindingReverseMapping(func_->GetNumParamsAndLocals(),
                                         func_->bindings, &index_to_name);
-          WriteParams(index_to_name);
+          WriteParams(index_to_name, false);
         }
         break;
       }
@@ -2694,9 +2768,18 @@ void CWriter::Write(const Func& func) {
   func_sections_.clear();
   func_includes_.clear();
 
-  Write("static ", ResultType(func.decl.sig.result_types), " ",
-        GlobalName(ModuleFieldType::Func, func.name), "(");
-  WriteParamsAndLocals();
+  bool use_sret = !options_.features.sandbox_enabled() &&
+                  IsSRetDefinedFunction(func.name);
+
+  Write("static ");
+  if (use_sret) {
+    Write("struct w2c_sret_placeholder");
+  } else {
+    Write(ResultType(func.decl.sig.result_types));
+  }
+
+  Write(" ", GlobalName(ModuleFieldType::Func, func.name), "(");
+  WriteParamsAndLocals(use_sret);
   Write("FUNC_PROLOGUE;", Newline());
 
   PushFuncSection();
@@ -2712,19 +2795,23 @@ void CWriter::Write(const Func& func) {
   Write("FUNC_EPILOGUE;", Newline());
 
   // Return the top of the stack implicitly.
-  Index num_results = func.GetNumResults();
-  if (num_results == 1) {
-    Write("return ", StackVar(0), ";", Newline());
-  } else if (num_results >= 2) {
-    Write(OpenBrace());
-    Write(ResultType(func.decl.sig.result_types), " tmp;", Newline());
-    for (Index i = 0; i < num_results; ++i) {
-      Type type = func.GetResultType(i);
-      Writef("tmp.%c%d = ", MangleType(type), i);
-      Write(StackVar(num_results - i - 1), ";", Newline());
+  if (use_sret) {
+    Write("return w2c_sret_result;", Newline());
+  } else {
+    Index num_results = func.GetNumResults();
+    if (num_results == 1) {
+      Write("return ", StackVar(0), ";", Newline());
+    } else if (num_results >= 2) {
+      Write(OpenBrace());
+      Write(ResultType(func.decl.sig.result_types), " tmp;", Newline());
+      for (Index i = 0; i < num_results; ++i) {
+        Type type = func.GetResultType(i);
+        Writef("tmp.%c%d = ", MangleType(type), i);
+        Write(StackVar(num_results - i - 1), ";", Newline());
+      }
+      Write("return tmp;", Newline());
+      Write(CloseBrace(), Newline());
     }
-    Write("return tmp;", Newline());
-    Write(CloseBrace(), Newline());
   }
 
   stream_ = c_stream_;
@@ -2743,24 +2830,33 @@ void CWriter::Write(const Func& func) {
   func_ = nullptr;
 }
 
-void CWriter::WriteParamsAndLocals() {
+void CWriter::WriteParamsAndLocals(bool use_sret) {
   std::vector<std::string> index_to_name;
   MakeTypeBindingReverseMapping(func_->GetNumParamsAndLocals(), func_->bindings,
                                 &index_to_name);
-  WriteParams(index_to_name);
+  WriteParams(index_to_name, use_sret);
   Write(" ", OpenBrace());
+  if (use_sret) {
+    Write("struct w2c_sret_placeholder w2c_sret_result;", Newline());
+    Write(func_->GetParamType(0), " ", DefineParamName(index_to_name[0]),
+          " = (u64)&w2c_sret_result;", Newline());
+  }
   WriteLocals(index_to_name);
 }
 
-void CWriter::WriteParams(const std::vector<std::string>& index_to_name) {
+void CWriter::WriteParams(const std::vector<std::string>& index_to_name, bool use_sret) {
   bool need_comma = false;
   if (options_.features.sandbox_enabled()) {
     Write(ModuleInstanceTypeName(), "* instance");
     need_comma = true;
   }
-  if (func_->GetNumParams() != 0) {
+  Index param_start = 0;
+  if (use_sret) {
+    param_start = 1;
+  }
+  if (func_->GetNumParams() > param_start) {
     Indent(4);
-    for (Index i = 0; i < func_->GetNumParams(); ++i) {
+    for (Index i = param_start; i < func_->GetNumParams(); ++i) {
       if (need_comma) {
         Write(", ");
       } else {
@@ -2797,10 +2893,10 @@ void CWriter::WriteParamSymbols(const std::vector<std::string>& index_to_name) {
   Write(");", Newline());
 }
 
-void CWriter::WriteParamTypes(const FuncDeclaration& decl, bool is_varargs) {
+void CWriter::WriteParamTypes(const FuncDeclaration& decl, bool is_varargs, bool is_sret) {
   bool needs_comma = options_.features.sandbox_enabled();
   if (decl.GetNumParams() != 0) {
-    for (Index i = 0; i < decl.GetNumParams(); ++i) {
+    for (Index i = is_sret ? 1 : 0; i < decl.GetNumParams(); ++i) {
       if (needs_comma) {
         Write(", ");
       } else {
@@ -3128,6 +3224,12 @@ void CWriter::Write(const ExprList& exprs) {
         Index num_params = func.GetNumParams();
         Index num_results = func.GetNumResults();
 
+        if (isSRetEntryMarker(var.name())) {
+          // Entry marker calls are no-ops.  They only exist to guarantee that
+          // the marker is used somewhere and, thus, not discarded.
+          break;
+        }
+
         if (isVarargsAllocatorFun(var.name())) {
           // This is a call to an intrisic that prepares the
           // variable portion of the argument list of a subsequent
@@ -3150,6 +3252,28 @@ void CWriter::Write(const ExprList& exprs) {
           va_prepared = true;
           // Don't do anything else for this kind of call.
           break;
+        }
+
+        if (isSRetArgMarker(var.name())) {
+          // This is a call to an intrinsic that prepares the
+          // struct return pointer.  In normal WASM calling conventions
+          // this pointer is the first argument of a function call.
+          // In the un-sandboxed translation it becomes the address of
+          // the return value (using normal C conventions).
+          // The call to the marker function is a no-op.  It is reflected
+          // just by a type change of the corresponding value.
+          assert(num_results == 1);
+          assert(num_params == 1);
+          DropTypes(1);
+          PushType(Type::SRetPointer);
+          break;
+        }
+
+        // Check for a struct return pointer argument and handle
+        // it separately:
+        bool is_sret = num_params >= 1 && StackType(num_params - 1) == Type::SRetPointer;
+        if (is_sret) {
+          assert(num_results == 0);
         }
 
         // Check to see whether the call is to a varargs function,
@@ -3197,6 +3321,8 @@ void CWriter::Write(const ExprList& exprs) {
           Write(" tmp = ");
         } else if (num_results == 1) {
           Write(StackVar(num_params - 1, func.GetResultType(0)), " = ");
+        } else if (is_sret) {
+          Write("*(struct w2c_sret_placeholder*)", StackVar(num_params - 1, Type::I64), " = ");
         }
 
         Write(ExternalRef(ModuleFieldType::Func, var.name()), "(");
@@ -3213,7 +3339,7 @@ void CWriter::Write(const ExprList& exprs) {
         bool needs_comma = options_.features.sandbox_enabled();
 
         // Write fixed portion of the argument list:
-        for (Index i = 0; i < num_params; ++i) {
+        for (Index i = is_sret ? 1 : 0; i < num_params; ++i) {
           if (needs_comma) {
             Write(", ");
           } else {
@@ -3275,7 +3401,12 @@ void CWriter::Write(const ExprList& exprs) {
         const FuncDeclaration& decl = cast<CallIndirectExpr>(&expr)->decl;
         Index num_params = decl.GetNumParams();
         Index num_results = decl.GetNumResults();
-        
+
+        bool is_sret = num_params >= 1 && StackType(num_params) == Type::SRetPointer;
+        if (is_sret) {
+          assert(num_results == 0);
+        }
+
         assert(type_stack_.size() > num_params);
         if (num_results > 1) {
           Write(OpenBrace());
@@ -3283,12 +3414,14 @@ void CWriter::Write(const ExprList& exprs) {
           Write(" tmp = ");
         } else if (num_results == 1) {
           Write(StackVar(num_params, decl.GetResultType(0)), " = ");
+        } else if (is_sret) {
+          Write("*(struct w2c_sret_placeholder*)", StackVar(num_params, Type::I64), " = ");
         }
 
         bool needs_comma = false;
         if (!options_.features.sandbox_enabled()) {
           Write("((");
-          WriteCallIndirectFuncDeclaration(decl, "(*)", va_prepared);
+          WriteCallIndirectFuncDeclaration(decl, "(*)", va_prepared, is_sret);
           Write(")", StackVar(0), ")(");
         } else {
           const Table* table =
@@ -3324,7 +3457,7 @@ void CWriter::Write(const ExprList& exprs) {
         }
 
         // Write the fixed portion of the argument list:
-        for (Index i = 0; i < num_params; ++i) {
+        for (Index i = is_sret ? 1 : 0; i < num_params; ++i) {
           if (needs_comma) {
             Write(", ");
           } else {
@@ -5580,9 +5713,35 @@ void CWriter::WriteCSource() {
   WriteGetFuncType();
 }
 
+// Determines whether the given Func returns a struct
+// by value.  Such functions contain a call to the
+// WASM_SRET_ENTRY marker function.
+// (This call should appear very early on as one of
+// the very first instructions.  But for simplicity
+// this code scans the toplevel of the entire body.)
+static bool IsSRetFunc(const Func* func) {
+  for (const Expr& expr : func->exprs) {
+    if (expr.type() != ExprType::Call) {
+      break;
+    }
+    if (isSRetEntryMarker(cast<CallExpr>(&expr)->var.name())) {
+      return true;
+    }
+  }
+  return false;
+}
+
 Result CWriter::WriteModule(const Module& module) {
   WABT_USE(options_);
   module_ = &module;
+  // Initialize sret_defined_functions_ by scanning the
+  // bodies of all the module's Func instances.
+  sret_defined_functions_.clear();
+  for (const Func* func : module.funcs) {
+    if (IsSRetFunc(func)) {
+      sret_defined_functions_.insert(func->name);
+    }
+  }
   WriteCHeader();
   WriteCSource();
   return result_;
