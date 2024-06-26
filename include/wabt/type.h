@@ -55,6 +55,10 @@ class Type {
     I8U = 4,   // Not actually specified, but used internally with load/store
     I16U = 6,  // Not actually specified, but used internally with load/store
     I32U = 7,  // Not actually specified, but used internally with load/store
+
+    VarargsPlaceholder =
+        100,  // Represents variable argument portion of a varargs call
+    SRetPointer = 101,  // Represents struct return pointer
   };
 
   Type() = default;  // Provided so Type can be member of a union.

@@ -1,5 +1,3 @@
-#include <stdint.h>
-
 #ifndef WASM_RT_CORE_TYPES_DEFINED
 #define WASM_RT_CORE_TYPES_DEFINED
 typedef uint8_t u8;
