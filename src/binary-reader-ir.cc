@@ -97,9 +97,16 @@ class BinaryReaderIR : public BinaryReaderNop {
   static constexpr size_t kMaxFunctionResults = 1000;  // matches V8
 
  public:
-  BinaryReaderIR(Module* out_module, const char* filename, Errors* errors);
+  BinaryReaderIR(Module* out_module,
+                 const char* filename,
+                 Errors* errors,
+                 const ReadBinaryOptions& options);
 
   bool OnError(const Error&) override;
+
+  Result BeginSection(Index section_index,
+                      BinarySection section_type,
+                      Offset size) override;
 
   Result OnTypeCount(Index count) override;
   Result OnFuncType(Index index,
@@ -163,6 +170,7 @@ class BinaryReaderIR : public BinaryReaderNop {
 
   Result OnStartFunction(Index func_index) override;
 
+  Result BeginCodeSection(Offset size) override;
   Result OnFunctionBodyCount(Index count) override;
   Result BeginFunctionBody(Index index, Offset size) override;
   Result OnLocalDecl(Index decl_index, Index count, Type type) override;
@@ -292,6 +300,7 @@ class BinaryReaderIR : public BinaryReaderNop {
   Result BeginElemExpr(Index elem_index, Index expr_index) override;
   Result EndElemExpr(Index elem_index, Index expr_index) override;
 
+  Result BeginDataSection(Offset size) override;
   Result OnDataSegmentCount(Index count) override;
   Result BeginDataSegment(Index index,
                           Index memory_index,
@@ -317,6 +326,12 @@ class BinaryReaderIR : public BinaryReaderNop {
   Result OnGenericCustomSection(std::string_view name,
                                 const void* data,
                                 Offset size) override;
+
+  Result OnRelocCount(Index count, Index section_index) override;
+  Result OnReloc(RelocType type,
+                 Offset offset,
+                 Index index,
+                 uint32_t addend) override;
 
   Result BeginTagSection(Offset size) override { return Result::Ok; }
   Result OnTagCount(Index count) override { return Result::Ok; }
@@ -379,6 +394,8 @@ class BinaryReaderIR : public BinaryReaderNop {
   Result SetDataSegmentName(Index index, std::string_view name);
   Result SetElemSegmentName(Index index, std::string_view name);
   Result SetTagName(Index index, std::string_view name);
+  Result ValidateFunctionSymbol(Index symbol_index);
+  Result ValidateDataSegmentSymbol(Index symbol_index);
 
   std::string GetUniqueName(BindingHash* bindings,
                             const std::string& original_name);
@@ -392,12 +409,20 @@ class BinaryReaderIR : public BinaryReaderNop {
 
   CodeMetadataExprQueue code_metadata_queue_;
   std::string_view current_metadata_name_;
+
+  const ReadBinaryOptions& options_;
+
+  std::vector<BinarySection> section_types_;
 };
 
 BinaryReaderIR::BinaryReaderIR(Module* out_module,
                                const char* filename,
-                               Errors* errors)
-    : errors_(errors), module_(out_module), filename_(filename) {}
+                               Errors* errors,
+                               const ReadBinaryOptions& options)
+    : errors_(errors),
+      module_(out_module),
+      filename_(filename),
+      options_(options) {}
 
 Location BinaryReaderIR::GetLocation() const {
   Location loc;
@@ -501,6 +526,13 @@ std::string BinaryReaderIR::GetUniqueName(BindingHash* bindings,
 bool BinaryReaderIR::OnError(const Error& error) {
   errors_->push_back(error);
   return true;
+}
+
+Result BinaryReaderIR::BeginSection(Index section_index,
+                                    BinarySection section_code,
+                                    Offset size) {
+  section_types_.push_back(section_code);
+  return Result::Ok;
 }
 
 Result BinaryReaderIR::OnTypeCount(Index count) {
@@ -758,6 +790,11 @@ Result BinaryReaderIR::OnStartFunction(Index func_index) {
   Var start(func_index, GetLocation());
   module_->AppendField(
       std::make_unique<StartModuleField>(start, GetLocation()));
+  return Result::Ok;
+}
+
+Result BinaryReaderIR::BeginCodeSection(Offset size) {
+  module_->code_section_base_ = GetLocation().offset;
   return Result::Ok;
 }
 
@@ -1385,6 +1422,11 @@ Result BinaryReaderIR::EndElemExpr(Index elem_index, Index expr_index) {
   return EndInitExpr();
 }
 
+Result BinaryReaderIR::BeginDataSection(Offset size) {
+  module_->data_section_base_ = GetLocation().offset;
+  return Result::Ok;
+}
+
 Result BinaryReaderIR::OnDataSegmentCount(Index count) {
   WABT_TRY
   module_->data_segments.reserve(count);
@@ -1423,6 +1465,8 @@ Result BinaryReaderIR::OnDataSegmentData(Index index,
   assert(index == module_->data_segments.size() - 1);
   DataSegment* segment = module_->data_segments[index];
   segment->data.resize(size);
+  segment->data_offset =
+      GetLocation().offset - size - module_->data_section_base_;
   if (size > 0) {
     memcpy(segment->data.data(), data, size);
   }
@@ -1552,6 +1596,10 @@ Result BinaryReaderIR::SetMemoryName(Index index, std::string_view name) {
   if (name.empty()) {
     return Result::Ok;
   }
+  if (!options_.features.sandbox_enabled() && index > 0) {
+    PrintError("multiple memories used in no-sandbox mode");
+    return Result::Error;
+  }
   if (index >= module_->memories.size()) {
     PrintError("invalid memory index: %" PRIindex, index);
     return Result::Error;
@@ -1616,6 +1664,85 @@ Result BinaryReaderIR::OnNameEntry(NameSectionSubsection type,
       break;
     case NameSectionSubsection::ElemSegment:
       SetElemSegmentName(index, name);
+      break;
+  }
+  return Result::Ok;
+}
+
+Result BinaryReaderIR::ValidateFunctionSymbol(Index symbol_index) {
+  if (module_->function_symbols_.find(symbol_index) ==
+      module_->function_symbols_.end()) {
+    PrintError("unexpected function symbol with index %u\n", symbol_index);
+    return Result::Error;
+  }
+  return Result::Ok;
+}
+
+Result BinaryReaderIR::ValidateDataSegmentSymbol(Index symbol_index) {
+  if (module_->data_symbols_.find(symbol_index) ==
+          module_->data_symbols_.end() &&
+      module_->undefined_data_symbols_.find(symbol_index) ==
+          module_->undefined_data_symbols_.end()) {
+    PrintError("unexpected data segment symbol with index %" PRIindex,
+               symbol_index);
+    return Result::Error;
+  }
+  return Result::Ok;
+}
+
+Result BinaryReaderIR::OnRelocCount(Index count, Index section_index) {
+  module_->current_reloc_section_ = section_types_[section_index];
+  return Result::Ok;
+}
+
+Result BinaryReaderIR::OnReloc(RelocType type,
+                               Offset offset,
+                               Index index,
+                               uint32_t addend) {
+  if (options_.features.sandbox_enabled()) {
+    return Result::Ok;
+  }
+  if (module_->current_reloc_section_ != BinarySection::Code &&
+      module_->current_reloc_section_ != BinarySection::Data) {
+    return Result::Ok;
+  }
+  switch (type) {
+    case RelocType::TableIndexSLEB:
+    case RelocType::TableIndexSLEB64:
+      CHECK_RESULT(ValidateFunctionSymbol(index));
+      module_->function_symbol_by_fptr_load_offset_[offset] = index;
+      break;
+    case RelocType::TableIndexI32: {
+      CHECK_RESULT(ValidateFunctionSymbol(index));
+      module_->function_symbol_by_fptr32_init_offset_[offset] = index;
+      break;
+    }
+    case RelocType::TableIndexI64: {
+      CHECK_RESULT(ValidateFunctionSymbol(index));
+      module_->function_symbol_by_fptr64_init_offset_[offset] = index;
+      break;
+    }
+    case RelocType::MemoryAddressSLEB:
+    case RelocType::MemoryAddressSLEB64:
+    case RelocType::MemoryAddressLEB:
+    case RelocType::MemoryAddressLEB64:
+      CHECK_RESULT(ValidateDataSegmentSymbol(index));
+      module_->data_symbol_and_addend_by_mptr_load_offset_[offset] = {index,
+                                                                      addend};
+      break;
+    case RelocType::MemoryAddressI32: {
+      CHECK_RESULT(ValidateDataSegmentSymbol(index));
+      module_->data_symbol_and_addend_by_mptr32_init_offset_[offset] = {index,
+                                                                        addend};
+      break;
+    }
+    case RelocType::MemoryAddressI64: {
+      CHECK_RESULT(ValidateDataSegmentSymbol(index));
+      module_->data_symbol_and_addend_by_mptr64_init_offset_[offset] = {index,
+                                                                        addend};
+      break;
+    }
+    default:
       break;
   }
   return Result::Ok;
@@ -1689,11 +1816,13 @@ Result BinaryReaderIR::OnDataSymbol(Index index,
                                     Index segment,
                                     uint32_t offset,
                                     uint32_t size) {
-  if (name.empty()) {
-    return Result::Ok;
-  }
   if (flags & WABT_SYMBOL_FLAG_UNDEFINED) {
     // Refers to data in another file, `segment` not valid.
+    module_->undefined_data_symbols_[index] = name;
+    return Result::Ok;
+  }
+  module_->data_symbols_[index] = {segment, offset};
+  if (name.empty()) {
     return Result::Ok;
   }
   if (offset) {
@@ -1703,6 +1832,8 @@ Result BinaryReaderIR::OnDataSymbol(Index index,
   }
   if (segment >= module_->data_segments.size()) {
     PrintError("invalid data segment index: %" PRIindex, segment);
+    PrintError("name is: %.*s, offset: %u", static_cast<int>(name.length()),
+               name.data(), offset);
     return Result::Error;
   }
   DataSegment* seg = module_->data_segments[segment];
@@ -1717,12 +1848,13 @@ Result BinaryReaderIR::OnFunctionSymbol(Index index,
                                         uint32_t flags,
                                         std::string_view name,
                                         Index func_index) {
-  if (name.empty()) {
-    return Result::Ok;
-  }
   if (func_index >= module_->funcs.size()) {
     PrintError("invalid function index: %" PRIindex, func_index);
     return Result::Error;
+  }
+  module_->function_symbols_[index] = func_index;
+  if (name.empty()) {
+    return Result::Ok;
   }
   Func* func = module_->funcs[func_index];
   if (!func->name.empty()) {
@@ -1795,7 +1927,7 @@ Result ReadBinaryIr(const char* filename,
                     const ReadBinaryOptions& options,
                     Errors* errors,
                     Module* out_module) {
-  BinaryReaderIR reader(out_module, filename, errors);
+  BinaryReaderIR reader(out_module, filename, errors, options);
   return ReadBinary(data, size, &reader, options);
 }
 

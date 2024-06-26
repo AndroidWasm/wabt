@@ -20,12 +20,16 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_set>
 #include <vector>
 
+#include "wabt/binary.h"
 #include "wabt/binding-hash.h"
 #include "wabt/common.h"
 #include "wabt/intrusive-list.h"
@@ -956,6 +960,8 @@ struct DataSegment {
   std::string name;
   Var memory_var;
   ExprList offset;
+  Offset data_offset;  // Start of payload within data section relative to
+                       // data_section_base_.
   std::vector<uint8_t> data;
 };
 
@@ -1280,6 +1286,54 @@ struct Module {
     bool exceptions = false;
     bool threads = false;
   } features_used;
+
+  // Byte offset of the beginning of the CODE section and DATA sections, after
+  // their section identifiers.
+  Offset code_section_base_;
+  Offset data_section_base_;
+  BinarySection current_reloc_section_ = BinarySection::Invalid;
+
+  // Mappings from a symbol index (pointing into the symbol table from the
+  // "linking" section) to their corresponding function- and data segment index.
+  // The data segment index is paired with an offset relative to the beginning
+  // of that data segment.
+  std::unordered_map<Index, Index> function_symbols_;
+  std::unordered_map<Index, std::pair<Index, uint32_t>> data_symbols_;
+
+  // Mapping from a data symbol index to its name.  This mapping is only
+  // constructed for data symbols that are marked undefined.
+  std::unordered_map<Index, std::string> undefined_data_symbols_;
+
+  // Mapping from offsets of function pointer loads (operands of ixx.const
+  // instructions) to their correpsonding function relocation information,
+  // represented simply by the function symbol index.
+  // The offset is relative to code_section_base_.
+  std::unordered_map<Offset, Index> function_symbol_by_fptr_load_offset_;
+
+  // Mappings from offsets of function pointers within data segments to their
+  // function relocation information, represented simply by the function symbol.
+  // The offset is relative to data_section_base_.
+  // One mapping is for 32-bit pointers, the other for 64-bit pointers.
+  std::map<Offset, Index> function_symbol_by_fptr32_init_offset_;
+  std::map<Offset, Index> function_symbol_by_fptr64_init_offset_;
+
+  // Mapping from offsets of memory pointer loads (operands of ixx.const
+  // instructions) to their corresponding data relocation information,
+  // represented by a pair consisting of the data segment symbol index and the
+  // offset.
+  std::unordered_map<Offset, std::pair<Index, uint32_t>>
+      data_symbol_and_addend_by_mptr_load_offset_;
+
+  // Mapping from (ordered) offsets to 32- and 64-bit memory pointers within
+  // global data initializers to their corresponding data relocation
+  // information, represented by a pair consisting of the data segment symbol
+  // index and and "addend" (an offset relative to the base represented by that
+  // symbol).
+  // The key offsets are relative to data_section_base_.
+  std::map<Offset, std::pair<Index, uint32_t>>
+      data_symbol_and_addend_by_mptr32_init_offset_;
+  std::map<Offset, std::pair<Index, uint32_t>>
+      data_symbol_and_addend_by_mptr64_init_offset_;
 };
 
 enum class ScriptModuleType {
